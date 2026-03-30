@@ -1,0 +1,58 @@
+project:
+  name: phase-aware-pq-monitor
+  version: 0.1.0
+  timezone: Asia/Kolkata
+
+classes:
+  names:
+    - Normal
+    - Sag
+    - Swell
+    - Interruption
+    - HarmonicDistortion
+    - Transient
+    - Flicker
+  id_map:
+    Normal: 0
+    Sag: 1
+    Swell: 2
+    Interruption: 3
+    HarmonicDistortion: 4
+    Transient: 5
+    Flicker: 6
+
+signal:
+  fs_hz: 5000
+  samples_per_frame: 500
+  mains_frequency_hz: 50
+  harmonic_orders: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+
+calibration:
+  v_adc_midpoint: 2071
+  i_adc_midpoint: 2048
+  v_counts_to_volts: 0.00172
+  i_counts_to_amps: 0.030518
+
+features:
+  enable_time_domain: true
+  enable_fft_harmonics: true
+  enable_phase_aware: true
+  enable_dwt: true
+  expected_feature_length: 282
+  dwt_wavelet: db4
+  dwt_level: 5
+
+runtime:
+  max_queue_size: 64
+  ui_target_fps: 30
+  inference_target_hz: 10
+  drop_policy: drop_oldest
+
+paths:
+  artifacts_root: artifacts
+  synthetic_dataset: artifacts/datasets/synth_v1
+  real_dataset: artifacts/datasets/real_v1
+  run_logs: artifacts/runs
+  live_sessions: artifacts/live_sessions
+  models: artifacts/models
+  scalers: artifacts/scalers

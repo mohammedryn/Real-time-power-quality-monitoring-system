@@ -1,0 +1,21 @@
+# datasets
+dataset/
+artifacts/
+legacy/Single_signal_LM/model_1/dataset/
+legacy/Single_signal_LM/model_2/dataset/
+
+# python virtual environments
+.venv/
+venv/
+
+# python cache
+__pycache__/
+*.pyc
+
+# model weights (large)
+*.keras
+*.h5
+*.pt
+
+# system files
+.DS_Store

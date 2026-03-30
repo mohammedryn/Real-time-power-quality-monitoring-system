@@ -1,0 +1,14 @@
+numpy==1.26.4
+scipy==1.13.1
+pywavelets==1.6.0
+scikit-learn==1.5.1
+pyserial==3.5
+tensorflow==2.16.1
+matplotlib==3.9.2
+seaborn==0.13.2
+joblib==1.4.2
+pyyaml==6.0.2
+pyside6==6.7.2
+pyqtgraph==0.13.7
+psutil==6.0.0
+pytest==8.3.2
