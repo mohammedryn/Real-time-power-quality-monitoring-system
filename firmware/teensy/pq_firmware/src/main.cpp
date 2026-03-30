@@ -2,6 +2,10 @@
 #include <ADC.h>
 #include <FastCRC.h>
 
+#ifndef PQ_BENCH_MODE
+#define PQ_BENCH_MODE 0
+#endif
+
 // ---- Compile-time hardware constants (Teensy 4.1) ----
 // ADC pins for synchronized dual-channel acquisition
 static constexpr uint8_t PIN_VOLTAGE_ADC0 = A0;   // Pin 14 -> ADC0
@@ -65,6 +69,14 @@ void FASTRUN sampleISR() {
   int16_t v = static_cast<int16_t>(result.result_adc0);
   int16_t i = static_cast<int16_t>(result.result_adc1);
 
+#if PQ_BENCH_MODE
+  // Bench mode: collect fixed-size windows continuously without waiting for voltage zero-crossing.
+  if (!collecting && !windowReady) {
+    collecting = true;
+    sampleCount = 0;
+  }
+#else
+
   bool risingZC =
       (prevV < (ADC_MIDPOINT - ZC_HYSTERESIS)) &&
       (v >= (ADC_MIDPOINT + ZC_HYSTERESIS));
@@ -73,6 +85,7 @@ void FASTRUN sampleISR() {
     collecting = true;
     sampleCount = 0;
   }
+#endif
 
   if (collecting) {
     v_buf[sampleCount] = v;
