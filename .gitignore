@@ -19,3 +19,10 @@ __pycache__/
 
 # system files
 .DS_Store
+
+# platformio build/deps
+.pio/
+firmware/teensy/pq_firmware/.pio/
+
+# windows metadata sidecars
+*:Zone.Identifier
