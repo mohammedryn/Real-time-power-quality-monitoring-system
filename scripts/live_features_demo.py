@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.io.serial_receiver import SerialFrameReceiver
-from src.dsp.preprocess import preprocess_frame
+from src.dsp.preprocess import preprocess_frame, load_config
 from src.dsp.features import extract_features
 
 # ANSI Colour code bindings
@@ -29,6 +29,9 @@ def main():
 
     receiver = SerialFrameReceiver(args.port)
 
+    # Load calibration parameters BEFORE the fast loop starts
+    cfg = load_config(args.config)
+
     frames_processed = 0
     t_start = time.time()
 
@@ -36,13 +39,13 @@ def main():
 
     try:
         while True:
-            frame = receiver.get_frame(timeout=0.1)
+            frame = receiver.read_frame(frame_timeout=0.1)
             if frame is None:
                 continue
             
             # 1. Physics Preprocessing
             try:
-                processed = preprocess_frame(frame, args.config)
+                processed = preprocess_frame(frame.v_raw, frame.i_raw, cfg)
             except Exception as e:
                 print(f"Preprocess Error: {e}")
                 continue
