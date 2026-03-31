@@ -4,14 +4,13 @@ import queue
 import threading
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-from PySide6.QtCore import QTimer
+from pyqtgraph.Qt import QtWidgets, QtCore
 
 # Import from our project structure
 from src.io.serial_receiver import SerialFrameReceiver
 from src.dsp.preprocess import load_config, preprocess_frame
 
-class LiveWaveformApp(QMainWindow):
+class LiveWaveformApp(QtWidgets.QMainWindow):
     def __init__(self, port, config_path):
         super().__init__()
         self.setWindowTitle("PQ Monitor - Live Oscilloscope")
@@ -23,9 +22,9 @@ class LiveWaveformApp(QMainWindow):
         self.fs = int(self.cfg["signal"]["fs_hz"])
         
         # --- UI Setup ---
-        central_widget = QWidget()
+        central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
+        layout = QtWidgets.QVBoxLayout(central_widget)
         layout.setContentsMargins(0, 0, 0, 0)
         
         # PyQtGraph widget
@@ -62,7 +61,7 @@ class LiveWaveformApp(QMainWindow):
         self.thread.start()
         
         # --- UI Update Timer ---
-        self.timer = QTimer()
+        self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update_plots)
         self.timer.start(33)  # Roughly 30 updates per second
         
@@ -123,7 +122,7 @@ def main():
     parser.add_argument("--config", default="configs/default.yaml", help="Path to config file")
     args = parser.parse_args()
     
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     
     # Optional styling for a dark "Oscilloscope" theme
     app.setStyle("Fusion")
