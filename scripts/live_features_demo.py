@@ -27,7 +27,7 @@ def main():
     print(f"\n{BOLD}⚡ Power Quality AI Data Ingestion Engine ⚡{RESET}")
     print(f"Connecting to hardware on: {CYAN}{args.port}{RESET}")
 
-    receiver = SerialFrameReceiver(args.port, baudrate=115200)
+    receiver = SerialFrameReceiver(args.port)
     receiver.start()
 
     frames_processed = 0
