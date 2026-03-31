@@ -86,6 +86,9 @@ class LiveWaveformApp(QtWidgets.QMainWindow):
                             pass
                             
                     self.data_queue.put(processed)
+                    
+                    # HOTFIX PRINT: Show exact raw 0-4095 ADC values straight from the Teensy firmware block
+                    print(f"RAW A0: {frame.v_raw[0]}    |    RAW A10: {frame.i_raw[0]}")
                 except Exception as e:
                     print(f"[!] Preprocess error: {e}")
                     

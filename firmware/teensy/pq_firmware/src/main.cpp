@@ -64,13 +64,10 @@ void setupADC() {
 }
 
 void FASTRUN sampleISR() {
-  // Synchronized ADC read ensures zero inter-channel sample offset
-  ADC::Sync_result result = adc->readSynchronizedSingle();
-  int16_t v = static_cast<int16_t>(result.result_adc0);
-  int16_t i = static_cast<int16_t>(result.result_adc1);
-
-  // IMPORTANT: Restart the ADC conversion so it is ready for the NEXT timer tick
-  adc->startSynchronizedSingleRead(PIN_VOLTAGE_ADC0, PIN_CURRENT_ADC1);
+  // HOTFIX: The simplest, most foolproof way to read an ADC pin in Arduino. 
+  // This physically forces the Teensy hardware to sample those pins instantly.
+  int16_t v = static_cast<int16_t>(analogRead(PIN_VOLTAGE_ADC0));
+  int16_t i = static_cast<int16_t>(analogRead(PIN_CURRENT_ADC1));
 
 #if PQ_BENCH_MODE
   // Bench mode: collect fixed-size windows continuously without waiting for voltage zero-crossing.
