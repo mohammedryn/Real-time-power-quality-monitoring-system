@@ -69,6 +69,9 @@ void FASTRUN sampleISR() {
   int16_t v = static_cast<int16_t>(result.result_adc0);
   int16_t i = static_cast<int16_t>(result.result_adc1);
 
+  // IMPORTANT: Restart the ADC conversion so it is ready for the NEXT timer tick
+  adc->startSynchronizedSingleRead(PIN_VOLTAGE_ADC0, PIN_CURRENT_ADC1);
+
 #if PQ_BENCH_MODE
   // Bench mode: collect fixed-size windows continuously without waiting for voltage zero-crossing.
   if (!collecting && !windowReady) {
