@@ -35,7 +35,7 @@ class LiveWaveformApp(QtWidgets.QMainWindow):
         # Plot 1: Voltage
         self.p_v = self.win.addPlot(title="<span style='color: yellow; font-size: 14pt'>Voltage (V)</span>")
         self.p_v.showGrid(x=True, y=True, alpha=0.3)
-        self.p_v.setYRange(-400, 400) # Suitable range for 230V RMS (±325V peak) mains
+        # self.p_v.setYRange(-400, 400) # Suitable range for 230V RMS (±325V peak) mains
         self.p_v.setLabel('left', 'Voltage', units='V')
         self.p_v.setLabel('bottom', 'Time', units='ms')
         self.curve_v = self.p_v.plot(pen=pg.mkPen('#FFD700', width=2))
@@ -45,7 +45,7 @@ class LiveWaveformApp(QtWidgets.QMainWindow):
         # Plot 2: Current
         self.p_i = self.win.addPlot(title="<span style='color: cyan; font-size: 14pt'>Current (A)</span>")
         self.p_i.showGrid(x=True, y=True, alpha=0.3)
-        self.p_i.setYRange(-15, 15) # Dynamic scaling or fixed range depending on usual load 
+        # self.p_i.setYRange(-15, 15) # Dynamic scaling or fixed range depending on usual load 
         self.p_i.setLabel('left', 'Current', units='A')
         self.p_i.setLabel('bottom', 'Time', units='ms')
         self.curve_i = self.p_i.plot(pen=pg.mkPen('#00FFFF', width=2))
