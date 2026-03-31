@@ -28,7 +28,6 @@ def main():
     print(f"Connecting to hardware on: {CYAN}{args.port}{RESET}")
 
     receiver = SerialFrameReceiver(args.port)
-    receiver.start()
 
     frames_processed = 0
     t_start = time.time()
@@ -79,7 +78,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[*] Stopping pipeline...")
     finally:
-        receiver.stop()
+        receiver.close()
         print(f"Total Frames Passed to DSP: {frames_processed}")
 
 if __name__ == "__main__":
