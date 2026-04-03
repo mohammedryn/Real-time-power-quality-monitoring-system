@@ -6,6 +6,7 @@ legacy/Single_signal_LM/model_2/dataset/
 
 # python virtual environments
 .venv/
+.venv-win/
 venv/
 
 # python cache
@@ -26,3 +27,6 @@ firmware/teensy/pq_firmware/.pio/
 
 # windows metadata sidecars
 *:Zone.Identifier
+
+# local scratch scripts
+src/dsp/dsp_manual.py
