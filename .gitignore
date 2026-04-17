@@ -3,6 +3,7 @@ dataset/
 artifacts/
 legacy/Single_signal_LM/model_1/dataset/
 legacy/Single_signal_LM/model_2/dataset/
+.claude/
 
 # python virtual environments
 .venv/

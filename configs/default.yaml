@@ -30,7 +30,7 @@ signal:
 calibration:
   v_adc_midpoint: 2071
   i_adc_midpoint: 2048
-  v_counts_to_volts: 0.00172
+  v_counts_to_volts: 0.579
   i_counts_to_amps: 0.030518
 
 features:
