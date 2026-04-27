@@ -1,0 +1,9 @@
+/var/log/pq-monitor/*.log /var/log/pq-monitor/*.err {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

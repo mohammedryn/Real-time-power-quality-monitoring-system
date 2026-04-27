@@ -1,0 +1,21 @@
+[Unit]
+Description=Phase-Aware PQ Monitor (Pi Kiosk)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/pq-monitor
+EnvironmentFile=-/etc/default/pq-monitor
+ExecStart=/opt/pq-monitor/.venv/bin/python -m src.ui.app --port ${PQ_SERIAL_PORT} --config ${PQ_CONFIG_PATH} --receiver-mode ${PQ_RECEIVER_MODE} --model ${PQ_MODEL_PATH} --scaler ${PQ_SCALER_PATH}
+Restart=always
+RestartSec=2
+TimeoutStartSec=30
+KillSignal=SIGINT
+StandardOutput=append:/var/log/pq-monitor/pq-monitor.log
+StandardError=append:/var/log/pq-monitor/pq-monitor.err
+
+[Install]
+WantedBy=multi-user.target

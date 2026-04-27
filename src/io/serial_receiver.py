@@ -8,7 +8,11 @@ from pathlib import Path
 
 import serial
 
-from src.io.frame_protocol import FRAME_SIZE, MAGIC_BYTES, ParsedFrame, parse_frame
+from src.io.frame_protocol import (
+    FRAME_SIZE, FEATURE_FRAME_SIZE, MAGIC_BYTES,
+    ParsedFrame, FeatureFrame,
+    parse_frame, parse_feature_frame,
+)
 from src.dsp.preprocess import load_config, preprocess_frame
 
 
@@ -29,12 +33,17 @@ class SerialFrameReceiver:
         timeout: float = 1.0,
         reconnect_delay: float = 0.2,
         max_reconnect_attempts: int = 3,
+        mode: str = "raw",
     ) -> None:
+        if mode not in ("raw", "feature"):
+            raise ValueError(f"mode must be 'raw' or 'feature', got {mode!r}")
         self.port = port
         self.baud = baud
         self.timeout = timeout
         self.reconnect_delay = reconnect_delay
         self.max_reconnect_attempts = max_reconnect_attempts
+        self.mode = mode
+        self._frame_size = FEATURE_FRAME_SIZE if mode == "feature" else FRAME_SIZE
         self.ser: serial.Serial | None = None
         self.stats = ReceiverStats()
 
@@ -96,7 +105,11 @@ class SerialFrameReceiver:
                 return True
         return False
 
-    def read_frame(self, frame_timeout: float = 1.0, max_crc_failures: int = 8) -> ParsedFrame | None:
+    def read_frame(
+        self,
+        frame_timeout: float = 1.0,
+        max_crc_failures: int = 8,
+    ) -> ParsedFrame | FeatureFrame | None:
         if self.ser is None:
             self.open()
 
@@ -108,14 +121,17 @@ class SerialFrameReceiver:
                 self.stats.timeouts += 1
                 return None
 
-            remaining = self._read_exact(FRAME_SIZE - 4, deadline)
+            remaining = self._read_exact(self._frame_size - 4, deadline)
             if remaining is None:
                 self.stats.timeouts += 1
                 return None
 
             frame_bytes = MAGIC_BYTES + remaining
             try:
-                parsed = parse_frame(frame_bytes)
+                if self.mode == "feature":
+                    parsed: ParsedFrame | FeatureFrame = parse_feature_frame(frame_bytes)
+                else:
+                    parsed = parse_frame(frame_bytes)
             except ValueError:
                 self.stats.parse_failures += 1
                 continue
@@ -150,7 +166,7 @@ def record_raw_stream(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout)
+    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout, mode="raw")
     receiver.open()
 
     written = 0
@@ -173,6 +189,37 @@ def record_raw_stream(
     return output
 
 
+def record_feature_stream(
+    port: str,
+    output_path: str | Path,
+    target_frames: int = 120,
+    baud: int = 115200,
+    timeout: float = 1.0,
+) -> Path:
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout, mode="feature")
+    receiver.open()
+
+    written = 0
+    with output.open("wb") as fp:
+        try:
+            while written < target_frames:
+                frame = receiver.read_frame(frame_timeout=timeout)
+                if frame is None:
+                    continue
+                # Re-pack feature frames as deterministic binary stream for later validation/replay.
+                from src.io.frame_protocol import pack_feature_frame
+
+                fp.write(pack_feature_frame(frame.seq, frame.features))
+                written += 1
+        finally:
+            receiver.close()
+
+    return output
+
+
 def record_frame_snapshots(
     port: str,
     output_path: str | Path,
@@ -187,7 +234,7 @@ def record_frame_snapshots(
     cfg = load_config(config_path)
     expected_n = int(cfg["signal"]["samples_per_frame"])
 
-    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout)
+    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout, mode="raw")
     receiver.open()
 
     written = 0
@@ -227,9 +274,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=1.0)
     parser.add_argument(
         "--mode",
-        choices=["raw", "snapshots"],
+        choices=["raw", "snapshots", "feature"],
         default="raw",
-        help="raw: binary frame stream, snapshots: jsonl with raw+processed arrays",
+        help=(
+            "raw: binary raw-frame stream, "
+            "feature: binary feature-frame stream, "
+            "snapshots: jsonl with raw+processed arrays"
+        ),
     )
     parser.add_argument("--config", default="configs/default.yaml", help="Config file for snapshot mode")
     return parser
@@ -241,6 +292,14 @@ def main() -> int:
     start = time.time()
     if args.mode == "raw":
         out = record_raw_stream(
+            port=args.port,
+            output_path=args.output,
+            target_frames=args.frames,
+            baud=args.baud,
+            timeout=args.timeout,
+        )
+    elif args.mode == "feature":
+        out = record_feature_stream(
             port=args.port,
             output_path=args.output,
             target_frames=args.frames,

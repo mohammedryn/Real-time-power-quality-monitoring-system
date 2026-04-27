@@ -21,7 +21,7 @@ def extract_dwt_features(signal, wavelet='db4', level=5):
     Decomposition: Approximation cA5 and Details cD5, cD4, cD3, cD2, cD1.
     Computes [Mean, Std, Skewness, Kurtosis, Energy, Entropy] per band.
     """
-    coeffs = pywt.wavedec(signal, wavelet, level=level)
+    coeffs = pywt.wavedec(signal, wavelet, level=level, mode='periodization')
     features = []
     
     for coeff in coeffs:

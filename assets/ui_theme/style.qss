@@ -1,0 +1,70 @@
+QWidget {
+    background-color: #0f1417;
+    color: #e8eff2;
+    font-family: "DejaVu Sans";
+    font-size: 14px;
+}
+
+QMainWindow {
+    background-color: #0f1417;
+}
+
+QGroupBox {
+    border: 1px solid #2c3a40;
+    border-radius: 10px;
+    margin-top: 10px;
+    padding-top: 12px;
+    font-weight: 600;
+    background-color: #141c20;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 6px;
+    color: #9fd8ff;
+}
+
+QLabel {
+    color: #e8eff2;
+}
+
+QProgressBar {
+    border: 1px solid #2c3a40;
+    border-radius: 7px;
+    background-color: #1b252a;
+    min-height: 24px;
+}
+
+QProgressBar::chunk {
+    border-radius: 6px;
+    background-color: #4fb0d9;
+}
+
+QTableWidget {
+    border: 1px solid #2c3a40;
+    border-radius: 8px;
+    background-color: #121a1f;
+    gridline-color: #2b373d;
+    selection-background-color: #24495a;
+}
+
+QHeaderView::section {
+    background-color: #1d2a30;
+    color: #d8e8ef;
+    border: 0;
+    border-right: 1px solid #304047;
+    padding: 6px;
+    font-weight: 600;
+}
+
+QPlainTextEdit {
+    border: 1px solid #2c3a40;
+    border-radius: 8px;
+    background-color: #121a1f;
+    color: #d4e4eb;
+}
+
+QSplitter::handle {
+    background-color: #233139;
+}

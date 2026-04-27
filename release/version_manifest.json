@@ -1,0 +1,56 @@
+{
+  "manifest_version": "1.0",
+  "generated_at": "2026-04-27",
+  "git_commit_short": "65be6d8",
+  "project_version": "0.2.0-nonml",
+  "scope": {
+    "owner": "non-ML integration track",
+    "excluded_ml_scope": [
+      "synthetic dataset generation",
+      "model implementations M1-M4",
+      "training and ablation pipeline",
+      "domain adaptation"
+    ]
+  },
+  "implemented_components": [
+    "runtime buffers/metrics/pipeline",
+    "live inference entrypoint",
+    "offline replay entrypoint",
+    "touch dashboard UI",
+    "kiosk setup and systemd service",
+    "log rotation policy",
+    "runtime and e2e tests",
+    "deployment and demo runbooks",
+    "alignment and release docs"
+  ],
+  "validation": {
+    "pytest_full": {
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q",
+      "result": "59 passed, 2 warnings"
+    },
+    "firmware_compile": {
+      "command": "./scripts/compile_teensy_firmware.sh",
+      "result": "SUCCESS"
+    }
+  },
+  "hardware_blockers": [
+    {
+      "item": "HIL parity capture",
+      "command": ".venv/bin/python scripts/hil_compare_raw_feature.py --port /dev/ttyACM0 --frames 50 --pairing anchor --skip-prompts",
+      "status": "blocked",
+      "reason": "/dev/ttyACM0 not present in environment"
+    },
+    {
+      "item": "PQ_DEBUG_TIMING capture",
+      "command": ".venv/bin/python scripts/capture_teensy_timing.py --port /dev/ttyACM0 --seconds 30",
+      "status": "blocked",
+      "reason": "/dev/ttyACM0 not present in environment"
+    },
+    {
+      "item": "30-minute Pi soak test",
+      "command": "sudo systemctl restart pq-monitor.service and monitor for 30 minutes",
+      "status": "blocked",
+      "reason": "target Pi hardware session not available"
+    }
+  ]
+}
