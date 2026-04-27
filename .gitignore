@@ -15,7 +15,7 @@ __pycache__/
 *.pyc
 
 # model weights (large)
-*.keras
+
 *.h5
 *.pt
 
