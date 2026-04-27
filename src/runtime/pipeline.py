@@ -8,6 +8,7 @@ import time
 from typing import Iterable, Optional, Protocol, Union
 
 import numpy as np
+import serial
 
 from src.dsp.features import extract_features
 from src.dsp.preprocess import preprocess_frame
@@ -189,8 +190,12 @@ class RuntimePipeline:
         replay_source: Optional[Iterable[Union[FeatureFrame, ParsedFrame, dict, np.ndarray]]] = None,
         session_log_path: Optional[str] = None,
         serial_timeout: float = 1.0,
+        serial_retry_delay: float = 1.0,
         baud: int = 115200,
     ) -> None:
+        if serial_retry_delay <= 0.0:
+            raise ValueError("serial_retry_delay must be > 0")
+
         self.cfg = cfg
         self.predictor = predictor
         self.class_names = list(cfg["classes"]["names"])
@@ -227,6 +232,7 @@ class RuntimePipeline:
         self._stop_event = threading.Event()
         self._source_exhausted = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._serial_retry_delay = float(serial_retry_delay)
 
         self._logger = SessionLogger(session_log_path) if session_log_path else None
 
@@ -285,11 +291,25 @@ class RuntimePipeline:
                 return
 
             assert self._receiver is not None
-            self._receiver.open()
+            while not self._stop_event.is_set():
+                try:
+                    self._receiver.open()
+                    break
+                except (serial.SerialException, OSError):
+                    self._metrics.incr("serial_open_failures")
+                    self._receiver.close()
+                    if self._stop_event.wait(self._serial_retry_delay):
+                        return
 
             while not self._stop_event.is_set():
-                with self._metrics.time_stage("acquisition_ms"):
-                    frame = self._receiver.read_frame(frame_timeout=0.5)
+                try:
+                    with self._metrics.time_stage("acquisition_ms"):
+                        frame = self._receiver.read_frame(frame_timeout=0.5)
+                except (serial.SerialException, OSError):
+                    self._metrics.incr("serial_read_failures")
+                    self._receiver.close()
+                    self._stop_event.wait(self._serial_retry_delay)
+                    continue
                 if frame is None:
                     continue
                 self._metrics.incr("frames_ingested")

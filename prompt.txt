@@ -1,0 +1,59 @@
+You are the lead engineer for this repository. Complete all remaining non-ML work end-to-end with production quality.
+
+Project ownership split:
+
+ML teammate owns synthetic dataset generation, model architecture, training, ablation, and domain adaptation.
+You own everything else: firmware validation closure, runtime architecture, inference integration hooks, Pi UI, kiosk deployment, QA, and report alignment/handoff docs.
+Mandatory first steps:
+
+Read the task plan, PRD, migration tracker, and report.
+Build a non-ML gap matrix from current repo state.
+Start implementation immediately and continue until all non-ML chunks are complete or genuinely blocked by hardware availability.
+Hard constraints:
+
+Do not implement or alter ML-owned scope except minimal integration interfaces for loading model/scaler artifacts.
+Keep canonical class order unchanged.
+Keep sampling assumptions unchanged: fs 5000 Hz, N 500 samples.
+Keep serial protocol compatibility unchanged.
+Keep feature vector assumptions unchanged.
+No patchwork: no TODO placeholders, no stubs, no pseudo-implementations, no dead commented code, no temporary hacks.
+Execution plan:
+
+Firmware migration closure and evidence
+Complete remaining tracker checklist items.
+Capture and archive timing evidence and HIL parity evidence.
+Update tracker with exact commands, results, and residual risks.
+Runtime architecture
+Implement production 3-loop runtime: acquisition loop, DSP/inference loop, UI loop.
+Use bounded queues/ring buffers.
+Implement backpressure policy to keep UI responsive.
+Add latency and health instrumentation.
+Inference integration
+Implement live inference path and offline replay mode.
+Add structured session logging with timestamps and key metrics.
+Ensure robust reconnect behavior and graceful degradation.
+Handheld UI on Pi
+Build touch-first UI with live waveform view, harmonic spectrum, class probabilities, top-1 card, scalar metrics, event timeline, and system health.
+Ensure acquisition and inference never block UI rendering.
+Device deployment and reliability
+Implement kiosk startup and service auto-restart behavior.
+Add log persistence and rotation policy.
+Add deployment and assembly/runbook documentation.
+Verification and alignment closure
+Add missing non-ML integration tests and end-to-end checks.
+Produce demo runbook, alignment matrix, submission checklist, and version manifest.
+Generate final summary artifacts.
+Quality and validation requirements:
+
+All new modules must be config-driven, maintainable, and testable.
+Add tests for every critical non-ML interface you create.
+Run full test suite and include command list plus concise results.
+If hardware is unavailable, still complete all software work and provide exact hardware execution commands with expected artifact outputs, clearly marking only hardware-dependent evidence as blocked.
+Final response format:
+
+Completed non-ML chunks and acceptance evidence.
+Files created or updated.
+Tests and validation commands run with outcomes.
+Artifacts produced.
+Remaining blockers and exact next actions.
+Explicit statement that no patchwork remains.

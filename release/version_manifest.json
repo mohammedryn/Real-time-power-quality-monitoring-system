@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0",
   "generated_at": "2026-04-27",
-  "git_commit_short": "65be6d8",
+  "git_commit_short": "112bed3",
   "project_version": "0.2.0-nonml",
   "scope": {
     "owner": "non-ML integration track",
@@ -21,16 +21,43 @@
     "log rotation policy",
     "runtime and e2e tests",
     "deployment and demo runbooks",
+    "root README setup and run commands",
+    "kiosk optional artifact argument guard",
+    "live serial startup retry",
     "alignment and release docs"
   ],
   "validation": {
     "pytest_full": {
       "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q",
-      "result": "59 passed, 2 warnings"
+      "result": "63 passed, 2 warnings in 1.16s"
+    },
+    "ui_help": {
+      "command": ".venv/bin/python -m src.ui.app --help",
+      "result": "exit 0; help lists --model MODEL and --scaler SCALER as value-taking options"
+    },
+    "required_service_args_parse": {
+      "command": ".venv/bin/python -c \"from src.ui.app import _build_parser; _build_parser().parse_args(['--port','/dev/null']); print('required service args parse')\"",
+      "result": "exit 0; required service args parse"
+    },
+    "historical_bare_artifact_flags": {
+      "command": ".venv/bin/python -m src.ui.app --port /dev/null --model --scaler",
+      "result": "exit 2; argument --model: expected one argument; invalid by design because service flow no longer emits bare artifact flags"
+    },
+    "kiosk_script_syntax": {
+      "command": "bash -n src/system/kiosk_setup.sh",
+      "result": "exit 0"
     },
     "firmware_compile": {
       "command": "./scripts/compile_teensy_firmware.sh",
-      "result": "SUCCESS"
+      "result": "SUCCESS for PlatformIO env teensy41 after rerun outside sandbox; sandboxed attempt was blocked by read-only /home/rayan/.platformio lock/cache path"
+    },
+    "manifest_json": {
+      "command": ".venv/bin/python -m json.tool release/version_manifest.json",
+      "result": "exit 0 after manifest refresh"
+    },
+    "diff_check": {
+      "command": "git diff --check",
+      "result": "exit 0; warnings only for LF-to-CRLF working-copy normalization"
     }
   },
   "hardware_blockers": [

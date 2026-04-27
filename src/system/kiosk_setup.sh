@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT=""
-RUN_USER="pi"
-SERIAL_PORT="/dev/ttyACM0"
-CONFIG_PATH="configs/default.yaml"
-RECEIVER_MODE="feature"
-MODEL_PATH=""
-SCALER_PATH=""
-
 usage() {
   cat <<'EOF'
 Usage:
@@ -25,59 +17,85 @@ Options:
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --repo)
-      REPO_ROOT="$2"; shift 2 ;;
-    --user)
-      RUN_USER="$2"; shift 2 ;;
-    --port)
-      SERIAL_PORT="$2"; shift 2 ;;
-    --config)
-      CONFIG_PATH="$2"; shift 2 ;;
-    --receiver-mode)
-      RECEIVER_MODE="$2"; shift 2 ;;
-    --model)
-      MODEL_PATH="$2"; shift 2 ;;
-    --scaler)
-      SCALER_PATH="$2"; shift 2 ;;
-    -h|--help)
-      usage; exit 0 ;;
-    *)
-      echo "Unknown option: $1"
-      usage
-      exit 1 ;;
-  esac
-done
+build_exec_start() {
+  local repo_root="$1"
+  local model_path="${2:-}"
+  local scaler_path="${3:-}"
+  local exec_start
 
-if [[ -z "$REPO_ROOT" ]]; then
-  echo "--repo is required"
-  usage
-  exit 1
-fi
+  exec_start="$repo_root/.venv/bin/python -m src.ui.app --port \${PQ_SERIAL_PORT} --config \${PQ_CONFIG_PATH} --receiver-mode \${PQ_RECEIVER_MODE}"
+  if [[ -n "$model_path" ]]; then
+    exec_start+=" --model \${PQ_MODEL_PATH}"
+  fi
+  if [[ -n "$scaler_path" ]]; then
+    exec_start+=" --scaler \${PQ_SCALER_PATH}"
+  fi
 
-if [[ ! -d "$REPO_ROOT" ]]; then
-  echo "Repository path does not exist: $REPO_ROOT"
-  exit 1
-fi
+  printf '%s\n' "$exec_start"
+}
 
-if [[ "$EUID" -ne 0 ]]; then
-  echo "Run as root (use sudo)"
-  exit 1
-fi
+main() {
+  local REPO_ROOT=""
+  local RUN_USER="pi"
+  local SERIAL_PORT="/dev/ttyACM0"
+  local CONFIG_PATH="configs/default.yaml"
+  local RECEIVER_MODE="feature"
+  local MODEL_PATH=""
+  local SCALER_PATH=""
 
-SERVICE_TEMPLATE="$REPO_ROOT/src/system/service/pq-monitor.service"
-LOGROTATE_TEMPLATE="$REPO_ROOT/src/system/service/pq-monitor.logrotate"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repo)
+        REPO_ROOT="$2"; shift 2 ;;
+      --user)
+        RUN_USER="$2"; shift 2 ;;
+      --port)
+        SERIAL_PORT="$2"; shift 2 ;;
+      --config)
+        CONFIG_PATH="$2"; shift 2 ;;
+      --receiver-mode)
+        RECEIVER_MODE="$2"; shift 2 ;;
+      --model)
+        MODEL_PATH="$2"; shift 2 ;;
+      --scaler)
+        SCALER_PATH="$2"; shift 2 ;;
+      -h|--help)
+        usage; exit 0 ;;
+      *)
+        echo "Unknown option: $1"
+        usage
+        exit 1 ;;
+    esac
+  done
 
-if [[ ! -f "$SERVICE_TEMPLATE" ]]; then
-  echo "Missing service template: $SERVICE_TEMPLATE"
-  exit 1
-fi
+  if [[ -z "$REPO_ROOT" ]]; then
+    echo "--repo is required"
+    usage
+    exit 1
+  fi
 
-install -d -m 0755 /var/log/pq-monitor
-chown "$RUN_USER":"$RUN_USER" /var/log/pq-monitor
+  if [[ ! -d "$REPO_ROOT" ]]; then
+    echo "Repository path does not exist: $REPO_ROOT"
+    exit 1
+  fi
 
-cat >/etc/default/pq-monitor <<EOF
+  if [[ "$EUID" -ne 0 ]]; then
+    echo "Run as root (use sudo)"
+    exit 1
+  fi
+
+  local SERVICE_TEMPLATE="$REPO_ROOT/src/system/service/pq-monitor.service"
+  local LOGROTATE_TEMPLATE="$REPO_ROOT/src/system/service/pq-monitor.logrotate"
+
+  if [[ ! -f "$SERVICE_TEMPLATE" ]]; then
+    echo "Missing service template: $SERVICE_TEMPLATE"
+    exit 1
+  fi
+
+  install -d -m 0755 /var/log/pq-monitor
+  chown "$RUN_USER":"$RUN_USER" /var/log/pq-monitor
+
+  cat >/etc/default/pq-monitor <<EOF
 PQ_SERIAL_PORT=$SERIAL_PORT
 PQ_CONFIG_PATH=$CONFIG_PATH
 PQ_RECEIVER_MODE=$RECEIVER_MODE
@@ -85,20 +103,28 @@ PQ_MODEL_PATH=$MODEL_PATH
 PQ_SCALER_PATH=$SCALER_PATH
 EOF
 
-sed \
-  -e "s|^User=.*$|User=$RUN_USER|" \
-  -e "s|^Group=.*$|Group=$RUN_USER|" \
-  -e "s|^WorkingDirectory=.*$|WorkingDirectory=$REPO_ROOT|" \
-  -e "s|^ExecStart=.*$|ExecStart=$REPO_ROOT/.venv/bin/python -m src.ui.app --port \\${PQ_SERIAL_PORT} --config \\${PQ_CONFIG_PATH} --receiver-mode \\${PQ_RECEIVER_MODE} --model \\${PQ_MODEL_PATH} --scaler \\${PQ_SCALER_PATH}|" \
-  "$SERVICE_TEMPLATE" >/etc/systemd/system/pq-monitor.service
+  local EXEC_START
+  EXEC_START="$(build_exec_start "$REPO_ROOT" "$MODEL_PATH" "$SCALER_PATH")"
 
-if [[ -f "$LOGROTATE_TEMPLATE" ]]; then
-  install -m 0644 "$LOGROTATE_TEMPLATE" /etc/logrotate.d/pq-monitor
+  sed \
+    -e "s|^User=.*$|User=$RUN_USER|" \
+    -e "s|^Group=.*$|Group=$RUN_USER|" \
+    -e "s|^WorkingDirectory=.*$|WorkingDirectory=$REPO_ROOT|" \
+    -e "s|^ExecStart=.*$|ExecStart=$EXEC_START|" \
+    "$SERVICE_TEMPLATE" >/etc/systemd/system/pq-monitor.service
+
+  if [[ -f "$LOGROTATE_TEMPLATE" ]]; then
+    install -m 0644 "$LOGROTATE_TEMPLATE" /etc/logrotate.d/pq-monitor
+  fi
+
+  systemctl daemon-reload
+  systemctl enable pq-monitor.service
+  systemctl restart pq-monitor.service
+
+  echo "kiosk setup completed"
+  systemctl status pq-monitor.service --no-pager -n 20
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-
-systemctl daemon-reload
-systemctl enable pq-monitor.service
-systemctl restart pq-monitor.service
-
-echo "kiosk setup completed"
-systemctl status pq-monitor.service --no-pager -n 20
