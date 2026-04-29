@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import serial
 
 from src.io.frame_protocol import N_SAMPLES, pack_frame
 from src.io.serial_receiver import SerialFrameReceiver
+import src.io.serial_receiver as serial_receiver_mod
 
 
 class FakeSerial:
@@ -83,3 +86,41 @@ def test_receiver_reconnect_after_serial_exception(monkeypatch):
     assert frame is not None
     assert frame.seq == 200
     assert rx.stats.reconnects >= 1
+
+
+def test_main_dispatches_model4_mode_to_model4_recorder(monkeypatch, tmp_path):
+    calls = {"model4": 0, "raw": 0, "feature": 0, "snapshots": 0}
+
+    args = SimpleNamespace(
+        port="/dev/null",
+        output=str(tmp_path / "out.bin"),
+        frames=3,
+        baud=115200,
+        timeout=0.1,
+        mode="model4",
+        config="configs/default.yaml",
+    )
+
+    class _Parser:
+        def parse_args(self):
+            return args
+
+    monkeypatch.setattr(serial_receiver_mod, "_build_parser", lambda: _Parser())
+
+    def _mk(kind):
+        def _inner(**_kwargs):
+            calls[kind] += 1
+            return tmp_path / "dummy.out"
+        return _inner
+
+    monkeypatch.setattr(serial_receiver_mod, "record_model4_stream", _mk("model4"))
+    monkeypatch.setattr(serial_receiver_mod, "record_raw_stream", _mk("raw"))
+    monkeypatch.setattr(serial_receiver_mod, "record_feature_stream", _mk("feature"))
+    monkeypatch.setattr(serial_receiver_mod, "record_frame_snapshots", _mk("snapshots"))
+
+    rc = serial_receiver_mod.main()
+    assert rc == 0
+    assert calls["model4"] == 1
+    assert calls["raw"] == 0
+    assert calls["feature"] == 0
+    assert calls["snapshots"] == 0

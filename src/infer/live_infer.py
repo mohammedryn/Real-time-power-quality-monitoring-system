@@ -22,9 +22,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="configs/default.yaml", help="Config file path")
     parser.add_argument(
         "--receiver-mode",
-        choices=["feature", "raw"],
-        default="feature",
-        help="feature: use MCU 282-feature frames, raw: host DSP fallback",
+        choices=["model4", "feature", "raw"],
+        default="model4",
+        help="model4: 298-feature+waveform frames (default), feature: legacy 282-feature, raw: host DSP fallback",
     )
     parser.add_argument("--model", default=None, help="Path to model artifact (.joblib/.pkl/.keras/.h5)")
     parser.add_argument("--scaler", default=None, help="Optional scaler artifact path")
@@ -65,8 +65,10 @@ def main() -> int:
                 continue
 
             scored += 1
+            active = " + ".join(snapshot.active_labels) if snapshot.active_labels else snapshot.top1_label
             print(
                 f"seq={snapshot.seq:>6} "
+                f"active={active:<30} "
                 f"top1={snapshot.top1_label:<20} "
                 f"conf={snapshot.top1_confidence:0.3f} "
                 f"RMS_V={snapshot.metrics['rms_v']:8.3f} "

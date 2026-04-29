@@ -8,7 +8,7 @@ produce feature vectors that match the Python pipeline within tolerance.
 The Python reference here mirrors dsp.cpp exactly:
   - Same calibration constants (from configs/default.yaml)
   - Same Goertzel algorithm for harmonic extraction (float32)
-  - Same db4 DWT with periodization boundary (float32 inputs)
+    - Same db4 DWT with symmetric boundary (float32 inputs)
   - Same feature assembly order (from feature_index.py)
 
 Key design decision:
@@ -94,7 +94,7 @@ def _teensy_preprocess(v_raw: np.ndarray, i_raw: np.ndarray) -> tuple[np.ndarray
 
 
 def _dwt_stats_f32(x: np.ndarray) -> list[float]:
-    coeffs = pywt.wavedec(x.astype(np.float32), 'db4', level=5, mode='periodization')
+    coeffs = pywt.wavedec(x.astype(np.float32), 'db4', level=5, mode='symmetric')
     stats  = []
     for c in coeffs:
         if len(c) == 0:
@@ -108,6 +108,54 @@ def _dwt_stats_f32(x: np.ndarray) -> list[float]:
         p  = p[p > 0]
         en = float(-np.sum(p * np.log2(p))) if len(p) > 0 else 0.0
         stats.extend([mn, sd, sk, kt, e, en])
+    return stats
+
+
+def _dwt_stats_with_transients_f32(x: np.ndarray) -> list[float]:
+    """DWT with standard stats (36) + transient-booster metrics (6) = 42 total."""
+    coeffs = pywt.wavedec(x.astype(np.float32), 'db4', level=5, mode='symmetric')
+    stats  = []
+    
+    # Standard DWT stats (36 features)
+    for c in coeffs:
+        if len(c) == 0:
+            c = np.array([0.0], dtype=np.float32)
+        mn = float(np.mean(c))
+        sd = float(np.std(c))
+        e  = float(np.sum(c ** 2))
+        sk = float(np.mean((c - mn) ** 3) / sd ** 3) if sd > 1e-10 else 0.0
+        kt = float(np.mean((c - mn) ** 4) / sd ** 4 - 3.0) if sd > 1e-10 else 0.0
+        p  = c ** 2 / e if e > 0 else np.zeros_like(c)
+        p  = p[p > 0]
+        en = float(-np.sum(p * np.log2(p))) if len(p) > 0 else 0.0
+        stats.extend([mn, sd, sk, kt, e, en])
+    
+    # Transient-booster features (6 features)
+    cD1 = coeffs[-1]  # Highest frequency detail
+    cD2 = coeffs[-2]  # Second-highest frequency detail
+    
+    # Total energy for normalization
+    total_energy = np.sum([np.sum(c**2) for c in coeffs]) + 1e-9
+    
+    # Energy ratios
+    d1_energy_ratio = float(np.sum(cD1**2) / total_energy) if len(cD1) > 0 else 0.0
+    d2_energy_ratio = float(np.sum(cD2**2) / total_energy) if len(cD2) > 0 else 0.0
+    
+    # Max absolute amplitudes
+    d1_max_abs = float(np.max(np.abs(cD1))) if len(cD1) > 0 else 0.0
+    d2_max_abs = float(np.max(np.abs(cD2))) if len(cD2) > 0 else 0.0
+    
+    # TKEO (Teager-Kaiser Energy Operator) on cD1
+    if len(cD1) >= 3:
+        tkeo_values = cD1[1:-1]**2 - cD1[:-2] * cD1[2:]
+        tkeo_max = float(np.max(tkeo_values))
+        tkeo_mean = float(np.mean(tkeo_values))
+    else:
+        tkeo_max = 0.0
+        tkeo_mean = 0.0
+    
+    stats.extend([d1_energy_ratio, d2_energy_ratio, d1_max_abs, d2_max_abs, tkeo_max, tkeo_mean])
+    
     return stats
 
 
@@ -131,16 +179,25 @@ def _td_f32(x: np.ndarray) -> list[float]:
 
 
 def _teensy_features(v_raw: np.ndarray, i_raw: np.ndarray) -> np.ndarray:
-    """Full Python re-implementation of compute_features() in dsp.cpp."""
+    """Full Python re-implementation of compute_model4_frame() in firmware dsp.cpp."""
     v, i = _teensy_preprocess(v_raw, i_raw)
 
     feat: list[float] = []
 
-    # 1. Time-domain
+    # 1. Time-domain [0:24]
     feat.extend(_td_f32(v))
     feat.extend(_td_f32(i))
 
-    # 2. Harmonics + THD
+    # 2. Overall power metrics [24:28] (NEW)
+    v_rms = _td_f32(v)[2]  # RMS is at index 2
+    i_rms = _td_f32(i)[2]
+    apparent = float(v_rms * i_rms)
+    active = float(np.mean(v * i))
+    reactive = float(np.sqrt(max(0.0, apparent**2 - active**2)))
+    power_factor = float(active / apparent) if apparent > 1e-6 else 0.0
+    feat.extend([apparent, active, reactive, power_factor])
+
+    # 3. Harmonics + THD [28:56]
     v_mag, v_ph = _teensy_harmonics(v)
     i_mag, i_ph = _teensy_harmonics(i)
     feat.extend(v_mag.tolist())
@@ -150,18 +207,18 @@ def _teensy_features(v_raw: np.ndarray, i_raw: np.ndarray) -> np.ndarray:
     feat.append(v_rss / float(v_mag[0]) if v_mag[0] > 1e-6 else 0.0)
     feat.append(i_rss / float(i_mag[0]) if i_mag[0] > 1e-6 else 0.0)
 
-    # 3. Absolute phase sin/cos
+    # 4. Absolute phase sin/cos [56:108]
     feat.extend(np.sin(v_ph).tolist())
     feat.extend(np.cos(v_ph).tolist())
     feat.extend(np.sin(i_ph).tolist())
     feat.extend(np.cos(i_ph).tolist())
 
-    # 4. Cross-channel phase
+    # 5. Cross-channel phase [108:134]
     cross = v_ph - i_ph
     feat.extend(np.sin(cross).tolist())
     feat.extend(np.cos(cross).tolist())
 
-    # 5. Relative-to-fundamental
+    # 6. Relative-to-fundamental [134:182]
     rel_v = v_ph[1:] - v_ph[0]
     rel_i = i_ph[1:] - i_ph[0]
     feat.extend(np.sin(rel_v).tolist())
@@ -169,12 +226,12 @@ def _teensy_features(v_raw: np.ndarray, i_raw: np.ndarray) -> np.ndarray:
     feat.extend(np.sin(rel_i).tolist())
     feat.extend(np.cos(rel_i).tolist())
 
-    # 6. Harmonic power
+    # 7. Harmonic power [182:208]
     for h in range(N_HARM):
         feat.append(float(v_mag[h] * i_mag[h] * np.cos(cross[h])))
         feat.append(float(v_mag[h] * i_mag[h] * np.sin(cross[h])))
 
-    # 7. Circular stats
+    # 8. Circular stats [208:214]
     def c_mean(a):
         return float(np.arctan2(np.mean(np.sin(a)), np.mean(np.cos(a))))
     def c_std(a):
@@ -185,11 +242,12 @@ def _teensy_features(v_raw: np.ndarray, i_raw: np.ndarray) -> np.ndarray:
                  c_mean(i_ph), c_std(i_ph),
                  c_mean(cross), c_std(cross)])
 
-    # 8. DWT
-    feat.extend(_dwt_stats_f32(v))
-    feat.extend(_dwt_stats_f32(i))
+    # 9. DWT with transient-boosters [214:298]
+    # Standard DWT features (36 per channel) + transient-booster features (6 per channel)
+    feat.extend(_dwt_stats_with_transients_f32(v))
+    feat.extend(_dwt_stats_with_transients_f32(i))
 
-    assert len(feat) == 282
+    assert len(feat) == 298, f"Expected 298-element vector, got {len(feat)}"
     return np.array(feat, dtype=np.float32)
 
 
@@ -235,10 +293,10 @@ def _py_pipeline(v_adc: np.ndarray, i_adc: np.ndarray) -> np.ndarray:
 
 # ---- DWT band length test ---------------------------------------------------
 
-def test_dwt_band_lengths_under_periodization():
-    """Band lengths for N=500 under periodization must match canonical sizes."""
+def test_dwt_band_lengths_under_symmetric():
+    """Band lengths for N=500 under symmetric mode must match canonical sizes."""
     signal = np.random.default_rng(0).standard_normal(N).astype(np.float64)
-    coeffs = pywt.wavedec(signal, 'db4', level=5, mode='periodization')
+    coeffs = pywt.wavedec(signal, 'db4', level=5, mode='symmetric')
     expected = [DWT_BAND_SIZES[b] for b in ("cA5", "cD5", "cD4", "cD3", "cD2", "cD1")]
     actual   = [len(c) for c in coeffs]
     assert actual == expected, f"DWT band lengths {actual} != expected {expected}"

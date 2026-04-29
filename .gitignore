@@ -31,3 +31,4 @@ firmware/teensy/pq_firmware/.pio/
 
 # local scratch scripts
 src/dsp/dsp_manual.py
+study_roadmap.md

@@ -16,7 +16,7 @@ MAGIC         = 0xDEADBEEF
 MAGIC_BYTES   = MAGIC.to_bytes(4, "big")
 
 N_SAMPLES     = 500
-N_FEATURES    = 282
+N_FEATURES    = 282  # legacy feature frame — kept for backward compat
 
 # Raw frame: [magic 4B BE][seq 2B LE][n 2B LE][v_raw 1000B][i_raw 1000B][crc32 4B LE]
 _RAW_PAYLOAD  = 2 + 2 + (N_SAMPLES * 2) + (N_SAMPLES * 2)
@@ -26,10 +26,38 @@ FRAME_SIZE    = 4 + _RAW_PAYLOAD + 4        # 2012 bytes
 _FEAT_PAYLOAD = 2 + 2 + (N_FEATURES * 4)
 FEATURE_FRAME_SIZE = 4 + _FEAT_PAYLOAD + 4  # 1140 bytes
 
-# Valid n values and their corresponding total frame sizes
+# Model-ready frame type tag (occupies the same 2-byte "n" field; value 3
+# does not collide with N_SAMPLES=500 or N_FEATURES=282).
+MODEL_READY_FRAME_TYPE = 0x0003
+
+# Model-ready frame layout:
+#   [magic 4B BE][seq 2B LE][type 2B LE=0x0003]
+#   [X_wave 4000B: v_norm(500 f32) + i_norm(500 f32)]
+#   [X_mag  112B:  28 f32]
+#   [X_phase 1080B: 270 f32]
+#   [crc32 4B LE]
+# X_phase = feat[0:28] ++ feat[56:214] ++ feat[214:298] (270 floats total)
+_N_XWAVE_FLOATS  = 1000   # v_norm[500] + i_norm[500]
+_N_XMAG_FLOATS   = 28
+_N_XPHASE_FLOATS = 270
+
+_MODEL_PAYLOAD = (
+    2                          # seq
+    + 2                        # type
+    + _N_XWAVE_FLOATS  * 4    # X_wave
+    + _N_XMAG_FLOATS   * 4    # X_mag
+    + _N_XPHASE_FLOATS * 4    # X_phase
+)                              # = 5196 bytes
+
+MODEL_READY_FRAME_SIZE = 4 + _MODEL_PAYLOAD + 4   # 5204 bytes
+
+# Valid "n" values and their corresponding total frame sizes.
+# The model-ready frame uses type=3 in the "n" field; add it here so that
+# iter_frames_from_bytes() can identify and size it correctly.
 _FRAME_SIZE_FOR_N: dict[int, int] = {
-    N_SAMPLES:  FRAME_SIZE,
-    N_FEATURES: FEATURE_FRAME_SIZE,
+    N_SAMPLES:              FRAME_SIZE,
+    N_FEATURES:             FEATURE_FRAME_SIZE,
+    MODEL_READY_FRAME_TYPE: MODEL_READY_FRAME_SIZE,
 }
 
 # ---- Data classes ------------------------------------------------------------
@@ -59,6 +87,35 @@ class FeatureFrame:
     @property
     def crc_ok(self) -> bool:
         return self.rx_crc == self.calc_crc
+
+
+@dataclass
+class ModelReadyFrame:
+    """Frame produced by the Teensy model-ready DSP pipeline.
+
+    Contains three arrays that are fed directly to model_4:
+      X_wave  – peak-normalised waveform (500, 2) after reshape
+      X_mag   – harmonic magnitude features (28,)
+      X_phase – phase + wavelet features   (270,)
+    """
+    seq: int
+    X_wave: np.ndarray   # float32, shape (1000,) = v_norm[500] + i_norm[500]
+    X_mag: np.ndarray    # float32, shape (28,)
+    X_phase: np.ndarray  # float32, shape (270,)
+    rx_crc: int
+    calc_crc: int
+
+    @property
+    def crc_ok(self) -> bool:
+        return self.rx_crc == self.calc_crc
+
+    @property
+    def v_norm(self) -> np.ndarray:
+        return self.X_wave[:500]
+
+    @property
+    def i_norm(self) -> np.ndarray:
+        return self.X_wave[500:]
 
 
 @dataclass
@@ -147,9 +204,74 @@ def parse_feature_frame(frame: bytes) -> FeatureFrame:
                         rx_crc=rx_crc, calc_crc=calc_crc)
 
 
+# ---- Model-ready frame pack / parse -----------------------------------------
+
+def pack_model_ready_frame(
+    seq: int,
+    X_wave: np.ndarray,   # shape (1000,) = v_norm[500] + i_norm[500]
+    X_mag: np.ndarray,    # shape (28,)
+    X_phase: np.ndarray,  # shape (270,)
+) -> bytes:
+    """Pack a model-ready frame (5204 bytes)."""
+    xw = np.asarray(X_wave,  dtype="<f4").reshape(-1)
+    xm = np.asarray(X_mag,   dtype="<f4").reshape(-1)
+    xp = np.asarray(X_phase, dtype="<f4").reshape(-1)
+    if len(xw) != _N_XWAVE_FLOATS:
+        raise ValueError(f"X_wave must have {_N_XWAVE_FLOATS} floats, got {len(xw)}")
+    if len(xm) != _N_XMAG_FLOATS:
+        raise ValueError(f"X_mag must have {_N_XMAG_FLOATS} floats, got {len(xm)}")
+    if len(xp) != _N_XPHASE_FLOATS:
+        raise ValueError(f"X_phase must have {_N_XPHASE_FLOATS} floats, got {len(xp)}")
+
+    payload = (
+        struct.pack("<HH", seq & 0xFFFF, MODEL_READY_FRAME_TYPE)
+        + xw.tobytes()
+        + xm.tobytes()
+        + xp.tobytes()
+    )
+    crc = compute_crc(payload)
+    return MAGIC_BYTES + payload + struct.pack("<I", crc)
+
+
+def parse_model_ready_frame(frame: bytes) -> ModelReadyFrame:
+    """Parse a 5204-byte model-ready frame."""
+    if len(frame) != MODEL_READY_FRAME_SIZE:
+        raise ValueError(
+            f"Invalid model-ready frame length {len(frame)}; "
+            f"expected {MODEL_READY_FRAME_SIZE}")
+    if frame[:4] != MAGIC_BYTES:
+        raise ValueError("Invalid magic header")
+
+    payload = frame[4:4 + _MODEL_PAYLOAD]
+    seq, ftype = struct.unpack_from("<HH", payload, 0)
+    if ftype != MODEL_READY_FRAME_TYPE:
+        raise ValueError(f"Invalid frame type {ftype:#06x}; "
+                         f"expected {MODEL_READY_FRAME_TYPE:#06x}")
+
+    offset = 4
+    xw_bytes = offset + _N_XWAVE_FLOATS  * 4
+    xm_bytes = xw_bytes + _N_XMAG_FLOATS  * 4
+    xp_bytes = xm_bytes + _N_XPHASE_FLOATS * 4
+
+    X_wave  = np.frombuffer(payload[offset:xw_bytes], dtype="<f4").copy()
+    X_mag   = np.frombuffer(payload[xw_bytes:xm_bytes], dtype="<f4").copy()
+    X_phase = np.frombuffer(payload[xm_bytes:xp_bytes], dtype="<f4").copy()
+
+    rx_crc   = struct.unpack_from("<I", frame, 4 + _MODEL_PAYLOAD)[0]
+    calc_crc = compute_crc(payload)
+
+    return ModelReadyFrame(
+        seq=seq,
+        X_wave=X_wave,
+        X_mag=X_mag,
+        X_phase=X_phase,
+        rx_crc=rx_crc,
+        calc_crc=calc_crc,
+    )
+
+
 # ---- Variable-length iterator -----------------------------------------------
-# Handles mixed raw (n=500) and feature (n=282) frames in the same byte stream.
-# On unknown n: advances by 1 byte and rescans for the next magic occurrence.
+# Handles mixed raw (n=500), feature (n=282), and model-ready (type=3) frames.
 
 def iter_frames_from_bytes(blob: bytes) -> Iterator[bytes]:
     idx      = 0
@@ -160,7 +282,7 @@ def iter_frames_from_bytes(blob: bytes) -> Iterator[bytes]:
         if magic_pos < 0:
             return
 
-        # Need at least magic(4) + seq(2) + n(2) = 8 bytes to peek header
+        # Need at least magic(4) + seq(2) + n/type(2) = 8 bytes
         if magic_pos + 8 > blob_len:
             return
 
@@ -168,13 +290,12 @@ def iter_frames_from_bytes(blob: bytes) -> Iterator[bytes]:
 
         expected_size = _FRAME_SIZE_FOR_N.get(n)
         if expected_size is None:
-            # Unknown n: corrupt / garbage — advance 1 byte past magic and rescan
             idx = magic_pos + 1
             continue
 
         end = magic_pos + expected_size
         if end > blob_len:
-            return  # truncated frame; stop
+            return  # truncated
 
         yield blob[magic_pos:end]
         idx = end
@@ -207,9 +328,11 @@ def validate_recorded_stream(path: str | Path,
         _seq, n = struct.unpack_from("<HH", frame_bytes, 4)
         try:
             if n == N_SAMPLES:
-                parsed: Union[ParsedFrame, FeatureFrame] = parse_frame(frame_bytes)
+                parsed: Union[ParsedFrame, FeatureFrame, ModelReadyFrame] = parse_frame(frame_bytes)
             elif n == N_FEATURES:
                 parsed = parse_feature_frame(frame_bytes)
+            elif n == MODEL_READY_FRAME_TYPE:
+                parsed = parse_model_ready_frame(frame_bytes)
             else:
                 continue
         except ValueError:

@@ -20,7 +20,7 @@ class DashboardView(QtWidgets.QWidget):
         top_row = QtWidgets.QHBoxLayout()
         root.addLayout(top_row, stretch=0)
 
-        self._top1_card = QtWidgets.QLabel("Top-1: --")
+        self._top1_card = QtWidgets.QLabel("Active Faults: --")
         self._top1_card.setStyleSheet("font-size: 20px; font-weight: 700; padding: 8px;")
 
         self._timestamp = QtWidgets.QLabel("Updated: --")
@@ -89,9 +89,8 @@ class DashboardView(QtWidgets.QWidget):
         middle.setSizes([550, 450])
 
     def update_snapshot(self, snapshot: InferenceSnapshot) -> None:
-        self._top1_card.setText(
-            f"Top-1: {snapshot.top1_label} ({snapshot.top1_confidence * 100.0:5.1f}%)"
-        )
+        active = snapshot.active_labels if snapshot.active_labels else [snapshot.top1_label]
+        self._top1_card.setText(f"Active Faults: {' + '.join(active)}")
         ts_text = datetime.fromtimestamp(snapshot.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         self._timestamp.setText(f"Updated: {ts_text}")
 
@@ -103,6 +102,7 @@ class DashboardView(QtWidgets.QWidget):
             class_names=snapshot.class_names,
             probabilities=snapshot.probabilities,
             top1_label=snapshot.top1_label,
+            active_labels=snapshot.active_labels,
         )
 
         metrics = snapshot.metrics

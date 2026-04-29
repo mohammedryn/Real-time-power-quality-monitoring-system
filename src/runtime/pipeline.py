@@ -1,21 +1,36 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 import threading
 import time
-from typing import Iterable, Optional, Protocol, Union
+from typing import Iterable, List, Optional, Protocol, Union
 
 import numpy as np
 import serial
 
 from src.dsp.features import extract_features
 from src.dsp.preprocess import preprocess_frame
-from src.io.frame_protocol import FeatureFrame, ParsedFrame
+from src.io.frame_protocol import FeatureFrame, ModelReadyFrame, ParsedFrame
 from src.io.serial_receiver import SerialFrameReceiver
 from src.runtime.buffers import AtomicValue, BoundedQueue
 from src.runtime.metrics import RuntimeMetrics
+
+# ---- Feature index constants for the 298-element model-4 vector -------------
+# X_phase = feat[0:28] ++ feat[56:214] ++ feat[214:298]
+# X_mag   = feat[28:56]
+_IDX_RMS_V        = 2
+_IDX_RMS_I        = 14
+_IDX_THD_V        = 54   # within the 298-vector (power metrics inserted at [24:28])
+_IDX_THD_I        = 55
+_IDX_CROSS_SIN_H1 = 108
+_IDX_CROSS_COS_H1 = 121
+_IDX_HARM_V       = slice(28, 41)   # 13 voltage harmonic magnitudes
+_IDX_HARM_I       = slice(41, 54)   # 13 current harmonic magnitudes
+
+# Default per-class sigmoid thresholds (overridden by ml_inference.thresholds in config)
+_DEFAULT_THRESHOLDS = [0.50, 0.50, 0.35, 0.50, 0.50, 0.35, 0.50]
 
 
 def _read_device_temp_c() -> Optional[float]:
@@ -49,9 +64,11 @@ class PredictorProtocol(Protocol):
 class FrameContext:
     seq: int
     timestamp: float
-    features: np.ndarray
+    features: np.ndarray          # 298-element for model4; 282 for legacy
     v_phys: Optional[np.ndarray] = None
     i_phys: Optional[np.ndarray] = None
+    v_norm: Optional[np.ndarray] = None   # peak-normalised voltage (500,)
+    i_norm: Optional[np.ndarray] = None   # peak-normalised current (500,)
 
 
 @dataclass
@@ -66,6 +83,8 @@ class InferenceSnapshot:
     health: dict
     harmonics_v: list[float]
     harmonics_i: list[float]
+    active_labels: list[str] = field(default_factory=list)
+    active_probs: list[float] = field(default_factory=list)
     v_phys: Optional[list[float]] = None
     i_phys: Optional[list[float]] = None
     event: Optional[dict] = None
@@ -85,6 +104,7 @@ class SessionLogger:
             "top1": snapshot.top1_label,
             "confidence": snapshot.top1_confidence,
             "probabilities": snapshot.probabilities,
+            "active_labels": snapshot.active_labels,
             "metrics": snapshot.metrics,
             "health": snapshot.health,
             "event": snapshot.event,
@@ -102,7 +122,8 @@ class SessionLogger:
 class ArtifactPredictor:
     """Thin integration layer for external model/scaler artifacts.
 
-    This intentionally avoids implementing model architecture/training logic.
+    Supports single-input (sklearn / single-input Keras) and
+    three-input Keras models (model_4: wave_input, mag_input, phase_input).
     """
 
     def __init__(
@@ -115,6 +136,7 @@ class ArtifactPredictor:
         self._model = None
         self._scaler = None
         self._model_kind = "none"
+        self._is_multi_input = False   # set True for 3-input Keras models
 
         if scaler_path:
             self._scaler = self._load_joblib(scaler_path)
@@ -145,11 +167,34 @@ class ArtifactPredictor:
             except Exception as exc:  # pragma: no cover - env dependent
                 raise RuntimeError("TensorFlow is required to load keras/h5 model artifacts") from exc
             self._model_kind = "tensorflow"
-            return load_model(model_path)
+            loaded = load_model(model_path)
+            # Detect 3-input architecture (model_4: wave, mag, phase inputs)
+            try:
+                if isinstance(loaded.input, list) and len(loaded.input) == 3:
+                    self._is_multi_input = True
+            except Exception:
+                pass
+            return loaded
 
         raise ValueError(f"Unsupported model artifact format: {model_path.name}")
 
-    def predict_proba(self, feature_vector: np.ndarray) -> np.ndarray:
+    def predict_proba(
+        self,
+        feature_vector: np.ndarray,
+        v_norm: Optional[np.ndarray] = None,
+        i_norm: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Return per-class probabilities.
+
+        For 3-input (multi-label) models the 298-element feature_vector is
+        split into X_mag and X_phase, and v_norm/i_norm form X_wave.
+        Probabilities are NOT normalised for multi-label (sigmoid outputs are
+        independent per class).
+        """
+        if self._is_multi_input and v_norm is not None and i_norm is not None:
+            return self._predict_multi_input(feature_vector, v_norm, i_norm)
+
+        # --- Single-input path (sklearn or single-input Keras) ---
         x = np.asarray(feature_vector, dtype=np.float32).reshape(1, -1)
         if self._scaler is not None:
             x = self._scaler.transform(x)
@@ -178,6 +223,41 @@ class ArtifactPredictor:
             return np.full(len(self.class_names), 1.0 / len(self.class_names), dtype=np.float32)
         return probs / denom
 
+    def _predict_multi_input(
+        self,
+        features: np.ndarray,
+        v_norm: np.ndarray,
+        i_norm: np.ndarray,
+    ) -> np.ndarray:
+        """Call a 3-input Keras model (model_4 architecture).
+
+        features is the 298-element vector:
+          X_mag   = features[28:56]
+          X_phase = features[0:28] ++ features[56:214] ++ features[214:298]
+          X_wave  = stack([v_norm, i_norm], axis=-1).reshape(1, 500, 2)
+        """
+        feat = np.asarray(features, dtype=np.float32)
+        X_wave = np.stack(
+            [np.asarray(v_norm, dtype=np.float32),
+             np.asarray(i_norm, dtype=np.float32)],
+            axis=-1
+        ).reshape(1, 500, 2)
+
+        X_mag = feat[28:56].reshape(1, 28)
+        X_phase = np.concatenate([feat[0:28], feat[56:214], feat[214:298]]).reshape(1, 270)
+
+        probs = np.asarray(
+            self._model.predict([X_wave, X_mag, X_phase], verbose=0),
+            dtype=np.float32,
+        ).reshape(-1)
+
+        if probs.size != len(self.class_names):
+            raise ValueError(
+                f"Model output size {probs.size} does not match class count {len(self.class_names)}"
+            )
+
+        return np.maximum(probs, 0.0)
+
 
 class RuntimePipeline:
     def __init__(
@@ -186,8 +266,8 @@ class RuntimePipeline:
         predictor: PredictorProtocol,
         *,
         port: Optional[str] = None,
-        receiver_mode: str = "feature",
-        replay_source: Optional[Iterable[Union[FeatureFrame, ParsedFrame, dict, np.ndarray]]] = None,
+        receiver_mode: str = "model4",
+        replay_source: Optional[Iterable[Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray]]] = None,
         session_log_path: Optional[str] = None,
         serial_timeout: float = 1.0,
         serial_retry_delay: float = 1.0,
@@ -205,7 +285,7 @@ class RuntimePipeline:
         queue_size = int(runtime_cfg.get("max_queue_size", 64))
         drop_policy = str(runtime_cfg.get("drop_policy", "drop_oldest"))
 
-        self._acq_queue: BoundedQueue[Union[FeatureFrame, ParsedFrame, dict, np.ndarray]] = BoundedQueue(
+        self._acq_queue: BoundedQueue[Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray]] = BoundedQueue(
             max_size=queue_size, drop_policy=drop_policy
         )
         self._result_queue: BoundedQueue[InferenceSnapshot] = BoundedQueue(
@@ -216,6 +296,18 @@ class RuntimePipeline:
 
         self._expected_n = int(cfg["signal"]["samples_per_frame"])
         self._mains_freq = float(cfg["signal"].get("mains_frequency_hz", 50.0))
+
+        # Multi-label inference config
+        ml_cfg = cfg.get("ml_inference", {})
+        self._multi_label: bool = bool(ml_cfg.get("multi_label", False))
+        thresh_map: dict = ml_cfg.get("thresholds", {})
+        if thresh_map:
+            self._class_thresholds: List[float] = [
+                float(thresh_map.get(name, 0.50)) for name in self.class_names
+            ]
+        else:
+            n = len(self.class_names)
+            self._class_thresholds = _DEFAULT_THRESHOLDS[:n] if n <= len(_DEFAULT_THRESHOLDS) else [0.50] * n
 
         self._receiver: Optional[SerialFrameReceiver] = None
         if replay_source is None:
@@ -329,7 +421,16 @@ class RuntimePipeline:
             with self._metrics.time_stage("inference_total_ms"):
                 context = self._frame_to_context(frame)
                 with self._metrics.time_stage("model_ms"):
-                    probs = self.predictor.predict_proba(context.features)
+                    # Route to 3-input call when predictor supports it and
+                    # the frame provided normalised waveforms.
+                    if (getattr(self.predictor, "_is_multi_input", False)
+                            and context.v_norm is not None
+                            and context.i_norm is not None):
+                        probs = self.predictor.predict_proba(
+                            context.features, context.v_norm, context.i_norm
+                        )
+                    else:
+                        probs = self.predictor.predict_proba(context.features)
                 snapshot = self._build_snapshot(context, probs)
 
             self._metrics.incr("frames_scored")
@@ -340,8 +441,28 @@ class RuntimePipeline:
             if self._logger is not None:
                 self._logger.write(snapshot)
 
-    def _frame_to_context(self, frame: Union[FeatureFrame, ParsedFrame, dict, np.ndarray]) -> FrameContext:
+    def _frame_to_context(
+        self,
+        frame: Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray],
+    ) -> FrameContext:
         now = time.time()
+
+        if isinstance(frame, ModelReadyFrame):
+            # Reconstruct the 298-element feature vector:
+            #   features = X_phase[0:28] ++ X_mag ++ X_phase[28:]
+            # This is the inverse of the slicing done on the Teensy.
+            features = np.concatenate([
+                frame.X_phase[:28],      # feat[0:28]  – time-domain stats
+                frame.X_mag,             # feat[28:56] – harmonic mags + THD
+                frame.X_phase[28:],      # feat[56:298] – phase, power, wavelet
+            ]).astype(np.float32)
+            return FrameContext(
+                seq=int(frame.seq),
+                timestamp=now,
+                features=features,
+                v_norm=np.asarray(frame.v_norm, dtype=np.float32),
+                i_norm=np.asarray(frame.i_norm, dtype=np.float32),
+            )
 
         if isinstance(frame, FeatureFrame):
             features = np.asarray(frame.features, dtype=np.float32)
@@ -356,6 +477,8 @@ class RuntimePipeline:
                 features=np.asarray(features, dtype=np.float32),
                 v_phys=np.asarray(processed["v_phys"], dtype=np.float32),
                 i_phys=np.asarray(processed["i_phys"], dtype=np.float32),
+                v_norm=np.asarray(processed["v_norm"], dtype=np.float32),
+                i_norm=np.asarray(processed["i_norm"], dtype=np.float32),
             )
 
         if isinstance(frame, np.ndarray):
@@ -368,6 +491,30 @@ class RuntimePipeline:
                 features = np.asarray(frame["features"], dtype=np.float32).reshape(-1)
                 return FrameContext(seq=seq, timestamp=now, features=features)
 
+            if all(k in frame for k in ("X_wave", "X_mag", "X_phase")):
+                x_wave = np.asarray(frame["X_wave"], dtype=np.float32).reshape(-1)
+                x_mag = np.asarray(frame["X_mag"], dtype=np.float32).reshape(-1)
+                x_phase = np.asarray(frame["X_phase"], dtype=np.float32).reshape(-1)
+
+                if x_wave.size != 1000 or x_mag.size != 28 or x_phase.size != 270:
+                    raise ValueError(
+                        "Model-ready dict requires X_wave(1000), X_mag(28), X_phase(270)"
+                    )
+
+                features = np.concatenate([
+                    x_phase[:28],
+                    x_mag,
+                    x_phase[28:],
+                ]).astype(np.float32)
+
+                return FrameContext(
+                    seq=seq,
+                    timestamp=now,
+                    features=features,
+                    v_norm=np.asarray(x_wave[:500], dtype=np.float32),
+                    i_norm=np.asarray(x_wave[500:], dtype=np.float32),
+                )
+
             if "v_raw" in frame and "i_raw" in frame:
                 v_raw = np.asarray(frame["v_raw"], dtype=np.int16)
                 i_raw = np.asarray(frame["i_raw"], dtype=np.int16)
@@ -379,6 +526,8 @@ class RuntimePipeline:
                     features=np.asarray(features, dtype=np.float32),
                     v_phys=np.asarray(processed["v_phys"], dtype=np.float32),
                     i_phys=np.asarray(processed["i_phys"], dtype=np.float32),
+                    v_norm=np.asarray(processed["v_norm"], dtype=np.float32),
+                    i_norm=np.asarray(processed["i_norm"], dtype=np.float32),
                 )
 
         raise TypeError(f"Unsupported frame type: {type(frame)!r}")
@@ -390,14 +539,19 @@ class RuntimePipeline:
         top1_label = self.class_names[top_idx]
         top1_conf = float(probs[top_idx])
 
+        # Extract metrics from the feature vector.
+        # Indices are valid for both 298-element (model4) and 282-element
+        # (legacy) vectors — all accesses are within 0..281.
         features = context.features
-        rms_v = float(features[2])
-        rms_i = float(features[14])
-        thd_v = float(features[50])
-        thd_i = float(features[51])
+        n_feat = len(features)
 
-        cross_sin_h1 = float(features[104])
-        cross_cos_h1 = float(features[117])
+        rms_v = float(features[_IDX_RMS_V]) if n_feat > _IDX_RMS_V else 0.0
+        rms_i = float(features[_IDX_RMS_I]) if n_feat > _IDX_RMS_I else 0.0
+        thd_v = float(features[_IDX_THD_V]) if n_feat > _IDX_THD_V else 0.0
+        thd_i = float(features[_IDX_THD_I]) if n_feat > _IDX_THD_I else 0.0
+
+        cross_sin_h1 = float(features[_IDX_CROSS_SIN_H1]) if n_feat > _IDX_CROSS_SIN_H1 else 0.0
+        cross_cos_h1 = float(features[_IDX_CROSS_COS_H1]) if n_feat > _IDX_CROSS_COS_H1 else 0.0
         phase_h1 = float(np.arctan2(cross_sin_h1, cross_cos_h1))
 
         dpf = float(np.cos(phase_h1))
@@ -422,7 +576,9 @@ class RuntimePipeline:
         if self._receiver is not None:
             health["receiver"] = self._receiver.stats.__dict__
             health["serial_status"] = (
-                "connected" if (self._receiver.ser is not None and self._receiver.ser.is_open) else "disconnected"
+                "connected"
+                if (self._receiver.ser is not None and self._receiver.ser.is_open)
+                else "disconnected"
             )
 
         total_stats = health["runtime"].get("stages", {}).get("inference_total_ms", {})
@@ -433,20 +589,51 @@ class RuntimePipeline:
         if temp_c is not None:
             health["device_temp_c"] = temp_c
 
+        # Harmonic magnitudes (valid for both 282 and 298 feature vectors)
+        harm_v_end = _IDX_HARM_V.stop if n_feat >= _IDX_HARM_V.stop else n_feat
+        harm_i_end = _IDX_HARM_I.stop if n_feat >= _IDX_HARM_I.stop else n_feat
+        harmonics_v = [float(x) for x in features[_IDX_HARM_V.start:harm_v_end].tolist()]
+        harmonics_i = [float(x) for x in features[_IDX_HARM_I.start:harm_i_end].tolist()]
+
+        # Active labels (multi-label: threshold-based; single-label: top1 only)
+        active_labels: list[str] = []
+        active_probs_list: list[float] = []
+        if self._multi_label:
+            for name, prob, thresh in zip(self.class_names, probs.tolist(), self._class_thresholds):
+                if prob >= thresh:
+                    active_labels.append(name)
+                    active_probs_list.append(float(prob))
+            if not active_labels:
+                active_labels = [self.normal_label]
+                active_probs_list = [float(probs[0])]
+        else:
+            active_labels = [top1_label]
+            active_probs_list = [top1_conf]
+
+        # Event detection
         event = None
-        if top1_label != self.normal_label:
-            if top1_conf >= 0.9:
-                severity = "high"
-            elif top1_conf >= 0.7:
-                severity = "medium"
-            else:
-                severity = "low"
-            event = {
-                "label": top1_label,
-                "confidence": top1_conf,
-                "severity": severity,
-                "timestamp": context.timestamp,
-            }
+        if self._multi_label:
+            non_normal = [(l, p) for l, p in zip(active_labels, active_probs_list)
+                          if l != self.normal_label]
+            if non_normal:
+                max_conf = max(p for _, p in non_normal)
+                severity = "high" if max_conf >= 0.9 else ("medium" if max_conf >= 0.7 else "low")
+                event = {
+                    "labels": [l for l, _ in non_normal],
+                    "label": non_normal[0][0],
+                    "confidence": max_conf,
+                    "severity": severity,
+                    "timestamp": context.timestamp,
+                }
+        else:
+            if top1_label != self.normal_label:
+                severity = "high" if top1_conf >= 0.9 else ("medium" if top1_conf >= 0.7 else "low")
+                event = {
+                    "label": top1_label,
+                    "confidence": top1_conf,
+                    "severity": severity,
+                    "timestamp": context.timestamp,
+                }
 
         return InferenceSnapshot(
             seq=context.seq,
@@ -457,8 +644,10 @@ class RuntimePipeline:
             top1_confidence=top1_conf,
             metrics=metrics,
             health=health,
-            harmonics_v=[float(x) for x in features[24:37].tolist()],
-            harmonics_i=[float(x) for x in features[37:50].tolist()],
+            harmonics_v=harmonics_v,
+            harmonics_i=harmonics_i,
+            active_labels=active_labels,
+            active_probs=active_probs_list,
             v_phys=context.v_phys.tolist() if context.v_phys is not None else None,
             i_phys=context.i_phys.tolist() if context.i_phys is not None else None,
             event=event,

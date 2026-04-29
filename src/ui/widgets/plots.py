@@ -108,16 +108,33 @@ class ProbabilityPanel(QtWidgets.QGroupBox):
             self._bars.append(bar)
             self._value_labels.append(value_label)
 
-    def update_probabilities(self, class_names: Sequence[str], probabilities: Sequence[float], top1_label: str) -> None:
+    def update_probabilities(
+        self,
+        class_names: Sequence[str],
+        probabilities: Sequence[float],
+        top1_label: str,
+        active_labels: Sequence[str] | None = None,
+    ) -> None:
         if len(class_names) != len(self._class_names):
             return
         if len(probabilities) != len(self._class_names):
             return
 
+        active_set = set(active_labels) if active_labels else {top1_label}
+
         for idx, prob in enumerate(probabilities):
             value = max(0.0, min(1.0, float(prob)))
             self._bars[idx].setValue(int(round(value * 1000.0)))
             self._value_labels[idx].setText(f"{value * 100.0:5.1f}%")
+
+            is_active = self._class_names[idx] in active_set
             font = self._name_labels[idx].font()
-            font.setBold(self._class_names[idx] == top1_label)
+            font.setBold(is_active)
             self._name_labels[idx].setFont(font)
+
+            if is_active:
+                self._bars[idx].setStyleSheet(
+                    "QProgressBar::chunk { background-color: #4CAF50; }"
+                )
+            else:
+                self._bars[idx].setStyleSheet("")

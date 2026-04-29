@@ -10,15 +10,19 @@ from typing import Iterable, Iterator, Union
 
 import numpy as np
 
+from src.dsp.feature_index import TOTAL_FEATURES
 from src.dsp.preprocess import load_config
 from src.io.frame_protocol import (
     N_FEATURES,
     N_SAMPLES,
+    MODEL_READY_FRAME_TYPE,
     FeatureFrame,
+    ModelReadyFrame,
     ParsedFrame,
     iter_frames_from_bytes,
     parse_feature_frame,
     parse_frame,
+    parse_model_ready_frame,
 )
 from src.runtime.pipeline import ArtifactPredictor, RuntimePipeline
 
@@ -34,8 +38,11 @@ def _replay_from_npy(path: Path) -> Iterator[dict]:
     array = np.load(path)
     if array.ndim == 1:
         array = array.reshape(1, -1)
-    if array.shape[1] != N_FEATURES:
-        raise ValueError(f"Expected npy shape (*, {N_FEATURES}), got {array.shape}")
+    valid_widths = (N_FEATURES, TOTAL_FEATURES)
+    if array.shape[1] not in valid_widths:
+        raise ValueError(
+            f"Expected npy shape (*, one of {valid_widths}), got {array.shape}"
+        )
 
     for idx, row in enumerate(array):
         yield {"seq": idx, "features": row.astype(np.float32)}
@@ -50,10 +57,11 @@ def _replay_from_jsonl(path: Path) -> Iterator[dict]:
             payload = json.loads(line)
             if "seq" not in payload:
                 payload["seq"] = idx
+            _validate_replay_record(payload, source=f"{path}:{idx + 1}")
             yield payload
 
 
-def _replay_from_binary(path: Path) -> Iterator[Union[FeatureFrame, ParsedFrame]]:
+def _replay_from_binary(path: Path) -> Iterator[Union[FeatureFrame, ParsedFrame, ModelReadyFrame]]:
     blob = path.read_bytes()
     for frame_bytes in iter_frames_from_bytes(blob):
         _, n = struct.unpack_from("<HH", frame_bytes, 4)
@@ -61,9 +69,54 @@ def _replay_from_binary(path: Path) -> Iterator[Union[FeatureFrame, ParsedFrame]
             yield parse_feature_frame(frame_bytes)
         elif n == N_SAMPLES:
             yield parse_frame(frame_bytes)
+        elif n == MODEL_READY_FRAME_TYPE:
+            yield parse_model_ready_frame(frame_bytes)
 
 
-def load_replay_source(path: str) -> Iterable[Union[FeatureFrame, ParsedFrame, dict, np.ndarray]]:
+def _validate_replay_record(payload: dict, source: str) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError(f"Replay record must be a JSON object at {source}")
+
+    has_features = "features" in payload
+    has_raw = "v_raw" in payload and "i_raw" in payload
+    has_model_ready = all(k in payload for k in ("X_wave", "X_mag", "X_phase"))
+
+    mode_count = int(has_features) + int(has_raw) + int(has_model_ready)
+    if mode_count != 1:
+        raise ValueError(
+            "Replay record must contain exactly one payload type: "
+            "features OR (v_raw+i_raw) OR (X_wave+X_mag+X_phase) "
+            f"at {source}"
+        )
+
+    if has_features:
+        features = np.asarray(payload["features"], dtype=np.float32).reshape(-1)
+        if features.size != N_FEATURES:
+            raise ValueError(
+                f"Invalid features length {features.size} at {source}; expected {N_FEATURES}"
+            )
+
+    if has_raw:
+        v_raw = np.asarray(payload["v_raw"], dtype=np.int16).reshape(-1)
+        i_raw = np.asarray(payload["i_raw"], dtype=np.int16).reshape(-1)
+        if v_raw.size != N_SAMPLES or i_raw.size != N_SAMPLES:
+            raise ValueError(
+                f"Invalid raw waveform lengths at {source}; expected {N_SAMPLES} samples per channel"
+            )
+
+    if has_model_ready:
+        x_wave = np.asarray(payload["X_wave"], dtype=np.float32).reshape(-1)
+        x_mag = np.asarray(payload["X_mag"], dtype=np.float32).reshape(-1)
+        x_phase = np.asarray(payload["X_phase"], dtype=np.float32).reshape(-1)
+        if x_wave.size != 1000:
+            raise ValueError(f"Invalid X_wave length {x_wave.size} at {source}; expected 1000")
+        if x_mag.size != 28:
+            raise ValueError(f"Invalid X_mag length {x_mag.size} at {source}; expected 28")
+        if x_phase.size != 270:
+            raise ValueError(f"Invalid X_phase length {x_phase.size} at {source}; expected 270")
+
+
+def load_replay_source(path: str) -> Iterable[Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray]]:
     replay_path = Path(path)
     if not replay_path.exists():
         raise FileNotFoundError(f"Replay input not found: {replay_path}")

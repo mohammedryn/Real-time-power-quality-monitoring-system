@@ -38,9 +38,22 @@ features:
   enable_fft_harmonics: true
   enable_phase_aware: true
   enable_dwt: true
-  expected_feature_length: 282
+  expected_feature_length: 298
   dwt_wavelet: db4
   dwt_level: 5
+
+ml_inference:
+  model_path: artifacts/models/pqm_multilabel_model.keras
+  receiver_mode: model4
+  multi_label: true
+  thresholds:
+    Normal: 0.50
+    Sag: 0.50
+    Swell: 0.35
+    Interruption: 0.50
+    HarmonicDistortion: 0.50
+    Transient: 0.35
+    Flicker: 0.50
 
 runtime:
   max_queue_size: 64
