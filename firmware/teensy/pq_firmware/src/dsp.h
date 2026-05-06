@@ -20,9 +20,30 @@
 static constexpr int N_FEATURES     = 298;
 static constexpr int N_WAVE_SAMPLES = 500;
 
-// Calibration — must stay in sync with configs/default.yaml
-static constexpr float V_MIDPOINT = 2071.0f;
-static constexpr float V_SCALE    = 0.579f;    // volts per ADC count
+// Voltage frontend calibration for the AMC1301 + TLV9001 differential chain:
+//   Node_A = mains * (560 / (2.2M + 560))
+//   AMC1301 diff gain = 8.2 V/V
+//   TLV9001 diff gain = 1.5 V/V
+//   ADC sees 1.65 V bias + amplified AC waveform
+//
+// The DSP removes per-frame DC again, so this midpoint is mainly used as the
+// seed calibration value and to keep raw-to-physical conversion consistent.
+static constexpr float ADC_REF_VOLTS        = 3.3f;
+static constexpr float ADC_MAX_COUNTS       = 4095.0f;
+static constexpr float V_DIVIDER_TOP_OHMS   = 2200000.0f;
+static constexpr float V_DIVIDER_BOTTOM_OHMS = 560.0f;
+static constexpr float AMC1301_DIFF_GAIN    = 8.2f;
+static constexpr float TLV9001_DIFF_GAIN    = 1.5f;
+static constexpr float V_FRONTEND_GAIN =
+    (V_DIVIDER_BOTTOM_OHMS / (V_DIVIDER_TOP_OHMS + V_DIVIDER_BOTTOM_OHMS)) *
+    AMC1301_DIFF_GAIN *
+    TLV9001_DIFF_GAIN;
+
+// Bench-measured zero-input bias on the current board is ~2007 counts.
+static constexpr float V_MIDPOINT = 2007.0f;
+// Converts ADC counts (after midpoint removal) back to mains volts.
+static constexpr float V_SCALE =
+    ADC_REF_VOLTS / (ADC_MAX_COUNTS * V_FRONTEND_GAIN);
 static constexpr float I_MIDPOINT = 2048.0f;
 static constexpr float I_SCALE    = 0.030518f; // amps per ADC count
 

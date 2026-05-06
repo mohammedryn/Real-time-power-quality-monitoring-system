@@ -27,8 +27,9 @@ static constexpr uint32_t SAMPLE_PERIOD_US = 200;  // 1e6 / 5000
 static constexpr uint16_t FRAME_SAMPLES   = 500;
 
 // Zero-crossing settings (voltage channel)
-static constexpr int16_t ADC_MIDPOINT  = 2071;
+static constexpr int16_t ADC_MIDPOINT  = static_cast<int16_t>(V_MIDPOINT + 0.5f);
 static constexpr int16_t ZC_HYSTERESIS = 20;
+static constexpr uint8_t ZC_MID_SHIFT  = 11;  // ~410 ms low-pass at 5 kHz
 
 // ---- Frame protocol constants ----
 static constexpr uint32_t MAGIC = 0xDEADBEEF;
@@ -66,6 +67,7 @@ volatile bool     windowReady = false;
 volatile bool     collecting  = false;
 volatile uint16_t sampleCount = 0;
 volatile int16_t  prevV = ADC_MIDPOINT;
+volatile int32_t  vMidAccum = static_cast<int32_t>(ADC_MIDPOINT) << ZC_MID_SHIFT;
 
 static uint16_t frameSeq = 0;
 
@@ -99,6 +101,11 @@ void FASTRUN sampleISR() {
 
     adc->startSynchronizedSingleRead(PIN_VOLTAGE_ADC0, PIN_CURRENT_ADC1);
 
+    // Track the DC bias slowly so the zero-cross trigger follows the actual
+    // AMC1301/TLV9001 midpoint instead of relying on the old 2071-count bias.
+    vMidAccum += static_cast<int32_t>(v) - (vMidAccum >> ZC_MID_SHIFT);
+    int16_t vMid = static_cast<int16_t>(vMidAccum >> ZC_MID_SHIFT);
+
 #if PQ_BENCH_MODE
     if (!collecting && !windowReady) {
         collecting  = true;
@@ -106,8 +113,8 @@ void FASTRUN sampleISR() {
     }
 #else
     bool risingZC =
-        (prevV <  (ADC_MIDPOINT - ZC_HYSTERESIS)) &&
-        (v     >= (ADC_MIDPOINT + ZC_HYSTERESIS));
+        (prevV <  (vMid - ZC_HYSTERESIS)) &&
+        (v     >= (vMid + ZC_HYSTERESIS));
 
     if (!collecting && !windowReady && risingZC) {
         collecting  = true;
