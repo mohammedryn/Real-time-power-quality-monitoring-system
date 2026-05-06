@@ -5,9 +5,9 @@
 **Comprehensive Project Report — B.Tech Mini ProjectBranch:** Electronics & Instrumentation Engineering
 **Institution:** Ramaiah Institute of Technology (MSRIT), Bengaluru
 **Academic Year:** 2025–2026
-**Document Version:** 2.0 (Audited & Corrected)
-**Date:** March 2026
-**Status:** Final — Submission Ready
+**Document Version:** 3.0 (Repository-Aligned)
+**Date:** May 2026
+**Status:** Final — Repo-Aligned
 
 ---
 
@@ -41,9 +41,9 @@
 
 This project presents the complete design and implementation of a low-cost, hardware-enabled, real-time system for detection and classification of power quality (PQ) disturbances in low-voltage (LV) 230 V / 50 Hz industrial networks. The hardware sensing node uses a Texas Instruments AMC1301 reinforced isolated differential amplifier preceded by a precision 2.2 MΩ / 560 Ω resistor voltage divider to safely measure the 230 V mains waveform, and an Allegro ACS758LCB-050B Hall-effect current sensor to simultaneously capture load current. Both analog channels are sampled synchronously at 5 kHz using the dual-ADC simultaneous hardware mode of the PJRC Teensy 4.1 microcontroller (Cortex-M7 @ 600 MHz), giving exactly N = 500 samples per 50 Hz cycle — a deliberate design choice that places every harmonic (50, 100, 150, … Hz) on an exact integer FFT bin, eliminating spectral leakage entirely for stationary periodic signals.
 
-Captured 500-sample dual-channel frames are streamed via USB to a host PC where a multi-stage digital signal processing pipeline extracts: time-domain statistical features (RMS, crest factor, kurtosis, etc.), FFT-based harmonic phasors (magnitude and phase, orders 1–13, for both V and I), phase-aware inter-harmonic coupling features using circular-statistics-correct sin/cos encoding, and discrete wavelet transform (DWT) time–frequency subband features. The resulting 282-element (after removing redundant raw-angle features) standardised feature vector feeds a hybrid phase-aware CNN–LSTM deep learning classifier trained on 38,500 synthetically generated, noise-augmented samples across seven power quality disturbance classes: Normal, Sag, Swell, Interruption, Harmonic Distortion, Transient, and Flicker.
+In the current repository, the production runtime is a Raspberry Pi kiosk workflow. By default, the Teensy computes the canonical 298-element feature vector on-device, packs the inference inputs into a model-ready serial frame, and streams that payload over USB to the Pi. The Pi runtime consumes the packed `tflite` frame, reconstructs the three inference tensors `X_wave`, `X_mag`, and `X_phase`, and runs the deployed `artifacts/models/pqm_multilabel_model.tflite` model while driving a touch dashboard, event log, and replay/debug tooling. Legacy raw-frame and 282-feature compatibility paths remain in the repository for capture, parity testing, and fallback debugging, but they are no longer the active production contract.
 
-Four model variants (M1 through M4) are trained in a structured ablation study to directly quantify the accuracy improvement from phase features. Domain adaptation via fine-tuning the last two dense layers on 100–200 real hardware samples per class bridges the synthetic-to-real accuracy gap, which from comparable published work is typically 10–15 percentage points before adaptation. Total hardware cost for the complete analog sensing frontend is under ₹700.
+Four model variants (M1 through M4) remain the research lineage used to quantify the contribution of phase information, while the checked-in integration repository is centred on the exported TFLite inference artifact and the 298-feature deployment contract. Domain adaptation via fine-tuning on real hardware samples remains part of the ML plan, and the current frontend bill of materials in this report places the sensing hardware cost at approximately ₹791 rather than under ₹700.
 
 The project’s core scientific contribution is demonstrating that harmonic phase angles carry load-type-specific signatures that are statistically distinct even when harmonic magnitudes are nearly identical — and that a deep learning model trained on phase-aware features can exploit this information to improve classification accuracy by 1–3% overall and substantially more for hard-to-distinguish class pairs.
 
@@ -98,7 +98,7 @@ This project explicitly exploits harmonic phase information by combining it with
 
 ### 2.4 Project Motivation and Scope
 
-This project targets an **intelligent, low-cost, phase-aware PQ monitor** for academic demonstration, laboratory use, and small-scale industrial deployment. The total hardware cost is under ₹700 for the sensing frontend — compared to commercial PQ analysers costing ₹50,000 to ₹5,00,000. The project demonstrates:
+This project targets an **intelligent, low-cost, phase-aware PQ monitor** for academic demonstration, laboratory use, and small-scale industrial deployment. The current frontend bill of materials is approximately ₹791 for the sensing frontend — compared to commercial PQ analysers costing ₹50,000 to ₹5,00,000. The project demonstrates:
 
 1. That publication-quality harmonic measurements (amplitude AND phase) are achievable with commodity components when the electronics are designed carefully.
 2. That incorporating phase information into a deep learning classifier measurably improves classification accuracy versus magnitude-only methods.
@@ -127,10 +127,10 @@ Build a compact sensing frontend that measures 230 V mains voltage (with design 
 Implement a DSP chain that: (a) removes DC offsets and normalises waveform windows; (b) applies an N = 500 FFT with Δf = 10 Hz/bin, placing all 50 Hz harmonics on exact integer bins; (c) extracts harmonic magnitudes and phase angles for orders h = 1 through 13 for both voltage and current; (d) computes THD and Total Demand Distortion (TDD).
 
 **Objective 3 — Phase-Aware Feature Engineering with Correct Circular Statistics:**
-Compute phase-aware features including: sin/cos encoding of harmonic phase angles (avoiding ±π discontinuity), circular-statistics-correct inter-harmonic phase differences using `scipy.stats.circmean` and `scipy.stats.circstd`, phase-amplitude coupling ratios, odd/even harmonic phase statistics, and cross-channel (V–I) phase relationships. Combine with time-domain statistical features and DWT time–frequency features into a 282-element feature vector.
+Compute phase-aware features including: sin/cos encoding of harmonic phase angles (avoiding ±π discontinuity), circular-statistics-correct phase summaries, cross-channel (V–I) phase relationships, per-harmonic power terms, and DWT features with transient-sensitive boosters. In the current repository, these are assembled into the canonical 298-element deployment vector used by the firmware, host parity tests, and TFLite runtime.
 
 **Objective 4 — Phase-Aware Deep Learning Classifier with Ablation Study:**
-Train and validate a phase-aware hybrid CNN–LSTM classifier on a synthetic dataset with 5,500 examples per class of seven PQ disturbance types, using load-specific harmonic phase distributions for the Harmonic Distortion class to ensure the phase features carry genuinely discriminative information. Compare classification performance against three model variants (M1–M3) in a structured ablation study.
+Train and validate a phase-aware hybrid CNN–LSTM classifier on a synthetic dataset with 5,500 examples per class of seven PQ disturbance types, using load-specific harmonic phase distributions for the Harmonic Distortion class to ensure the phase features carry genuinely discriminative information. Compare classification performance against three model variants (M1–M3) in a structured ablation study, then export the production artifact as `artifacts/models/pqm_multilabel_model.tflite` for deployment in the Raspberry Pi runtime.
 
 **Objective 5 — Real-World Validation with Domain Adaptation:**
 Collect real measurements from the hardware node on laboratory loads; evaluate zero-shot classifier performance; then fine-tune the last two dense layers on 100–200 real samples per class to demonstrate domain adaptation, with accuracy comparison before and after fine-tuning.
@@ -372,17 +372,40 @@ In Python: `scipy.stats.circmean(angles, high=np.pi, low=-np.pi)` and `scipy.sta
 
 ### 7.1 Block Diagram
 
-![image.png](image.png)
+```text
+230 V mains + load current
+        |
+        v
+AMC1301 voltage frontend + ACS758 current frontend
+        |
+        v
+Teensy 4.1 dual ADC acquisition @ 5 kHz, N = 500
+        |
+        +--> Compatibility path: raw 2012-byte ADC frame
+        |
+        +--> Production path: on-device DSP -> 298-feature vector
+                                   |
+                                   v
+                     model-ready serial frame (`tflite` transport)
+                                   |
+                                   v
+                    Raspberry Pi runtime (`src.ui.app`)
+                                   |
+                 +-----------------+-----------------+
+                 |                                   |
+                 v                                   v
+       TFLite inference (`src/runtime`)      Touch dashboard + logs
+```
 
 ### 7.2 Data Flow Summary
 
 1. Mains voltage sensed by AMC1301 frontend (with isolated B0505S supply). Output level-shifted and filtered to 0–3.3 V.
 2. Load current wire passes through ACS758 Hall sensor body. Output (ratiometric to 3.3 V supply) filtered to 0–3.3 V.
 3. IntervalTimer ISR fires at exactly 5 kHz, triggering Teensy dual-ADC simultaneous read. Zero-crossing detection aligns window capture to the mains rising zero crossing.
-4. Complete 500-sample dual-channel frame (1000 int16 values) sent to PC over USB CDC serial as a 2012-byte binary packet with CRC32 integrity check.
-5. PC Python script receives, validates, and runs the frame through preprocessing and feature extraction.
-6. Trained CNN–LSTM model outputs 7-class probability distribution; argmax is the predicted disturbance label.
-7. Results logged with timestamp, waveform data, and extracted features for post-session analysis.
+4. In production mode, the Teensy computes the canonical 298-element feature vector locally and packs three inference tensors: `X_wave` (1000 floats), `X_mag` (28 floats), and `X_phase` (270 floats).
+5. The model-ready payload is sent over USB CDC as a CRC-protected `tflite` frame. The older 2012-byte raw ADC frame remains available as a compile-time compatibility/debug mode.
+6. The Raspberry Pi runtime validates the frame, reconstructs the canonical inference inputs, and runs `artifacts/models/pqm_multilabel_model.tflite`.
+7. The kiosk UI displays waveform, harmonics, probabilities, active labels, runtime health, and event summaries; replay/debug tools continue to support raw and legacy feature-frame workflows.
 
 ---
 
@@ -688,191 +711,106 @@ void setup() {
 
 ### 9.3 USB Serial Frame Protocol
 
-```
-Frame structure (CORRECTED — total 2012 bytes)
-─────────────────────────────────────────────
-Byte 0–3:      Magic number 0xDEADBEEF (4 bytes, big-endian)
-Byte 4–5:      Frame sequence number uint16_t (wraps at 65535)
-Byte 6–7:      N = 500 (uint16_t, sanity check)
-Byte 8–1007:   v_buf[0..499] as int16_t little-endian (1000 bytes)
-Byte 1008–2007: i_buf[0..499] as int16_t little-endian (1000 bytes)
-Byte 2008–2011: CRC32 of bytes 4–2007 inclusive (4 bytes)
-─────────────────────────────────────────────
-Total: 4 + 2 + 2 + 1000 + 1000 + 4 = 2012 bytes
-```
+The current firmware supports two transport modes:
 
-Data rate: 2012 × (5000/500) = 20,120 bytes/s ≈ 161 kbit/s. USB CDC bandwidth: 480 Mbit/s. Utilisation: 0.033%.
+1. **Production mode (default):** a model-ready `tflite` frame carrying the three inference tensors expected by the deployed TFLite model.
+2. **Compatibility mode (`PQ_RAW_MODE=1`):** the original raw 2012-byte ADC frame used for capture, hardware-in-the-loop parity checks, and host-side DSP fallback.
 
-```cpp
-// CRC32 uses the FastCRC library (FastCRC.h) with CRC-32/ISO-HDLC polynomial (0xEDB88320)
-// This MUST match the Python receiver's binascii.crc32() which uses the same polynomial.
-#include<FastCRC.h>
-FastCRC32 CRC32;
+The active production frame is:
 
-void sendFrame() {
-    // --- 1. Magic ---
-    uint32_t magic = 0xDEADBEEF;
-    Serial.write((uint8_t*)&magic, 4);
+```text
+[magic 4B BE][seq 2B LE][type 2B LE = 0x0003]
+[X_wave 4000B][X_mag 112B][X_phase 1080B]
+[crc32 4B LE]
 
-    // --- 2. Sequence number (transmitted BEFORE increment) ---
-    static uint16_t seqNum = 0;
-    uint16_t txSeqNum = seqNum;  // capture current value
-    Serial.write((uint8_t*)&txSeqNum, 2);
+X_wave  = v_norm[500] + i_norm[500]           -> 1000 float32 values
+X_mag   = feature_vector[28:56]               -> 28 float32 values
+X_phase = feature_vector[0:28] ++
+          feature_vector[56:214] ++
+          feature_vector[214:298]             -> 270 float32 values
 
-    // --- 3. N ---
-    uint16_t n = N;
-    Serial.write((uint8_t*)&n, 2);
-
-    // --- 4. Voltage buffer ---
-    Serial.write((uint8_t*)v_buf, N * 2);
-
-    // --- 5. Current buffer ---
-    Serial.write((uint8_t*)i_buf, N * 2);
-
-    // --- 6. CRC32 over bytes 4..2007 (seqNum + N + v_buf + i_buf) ---
-    // Build a contiguous buffer for CRC computation
-    uint8_t crcBuf[4 + N*4];
-    memcpy(crcBuf,           &txSeqNum, 2);  // seqNum (pre-increment)
-    memcpy(crcBuf + 2,       &n,        2);  // N
-    memcpy(crcBuf + 4,       (void*)v_buf, N * 2);
-    memcpy(crcBuf + 4 + N*2, (void*)i_buf, N * 2);
-    uint32_t crc = CRC32.crc32(crcBuf, sizeof(crcBuf));
-    Serial.write((uint8_t*)&crc, 4);
-
-    // --- 7. Increment sequence number AFTER CRC computation ---
-    seqNum++;
-
-    Serial.send_now();
-}
-
-void loop() {
-    if (windowReady) {
-        sendFrame();
-        windowReady = false;
-    }
-}
+Total frame size = 5204 bytes
 ```
 
-**Critical bug fix note:** The CRC is computed over the pre-increment sequence number (txSeqNum) and the CRC is transmitted after the data. The sequence number is incremented only after all transmission is complete. This ensures the transmitted seqNum and the CRC-covered seqNum are identical.
+The legacy raw frame remains:
+
+```text
+[magic 4B BE][seq 2B LE][n = 500][v_raw 1000B][i_raw 1000B][crc32 4B LE]
+
+Total frame size = 2012 bytes
+```
+
+Both formats use CRC32 over the payload bytes only. The firmware transmits the current sequence number and increments it only after the full frame has been written, keeping the payload and CRC consistent.
 
 ### 9.4 Python Frame Receiver
 
-```python
-import serial
-import struct
-import binascii
-import numpy as np
+The repository no longer relies on a one-off receiver snippet as the primary interface. Instead, frame parsing and transport compatibility are centralised in:
 
-MAGIC      = 0xDEADBEEF
-N          = 500
-FRAME_SIZE = 2012  # 4 + 2 + 2 + 1000 + 1000 + 4
+- `src/io/frame_protocol.py`
+- `src/io/serial_receiver.py`
 
-def open_port(port='/dev/ttyACM0', baud=115200):
-    return serial.Serial(port, baud, timeout=2.0)
+The receiver supports three runtime modes:
 
-def read_frame(ser):
-    """Block until a valid frame is received. Returns (v_buf, i_buf) as np.int16 arrays."""
-    # Scan for magic bytes
-    magic_bytes = MAGIC.to_bytes(4, 'big')
-    buf = b''
-    while True:
-        byte = ser.read(1)
-        if not byte:
-            continue
-        buf = (buf + byte)[-4:]
-        if buf == magic_bytes:
-            break
+- `raw` -> consumes 2012-byte ADC frames
+- `feature` -> consumes legacy 282-feature frames kept for backward compatibility
+- `tflite` -> consumes the current 5204-byte model-ready inference frame
 
-    # Read remaining frame (2012 - 4 = 2008 bytes)
-    rest = ser.read(FRAME_SIZE - 4)
-    if len(rest) < FRAME_SIZE - 4:
-        return None, None  # timeout
-
-    # Parse fields
-    seq_num = struct.unpack_from('<H', rest, 0)[0]   # uint16 LE
-    n_check = struct.unpack_from('<H', rest, 2)[0]   # should be 500
-    if n_check != N:
-        return None, None
-
-    v_raw = np.frombuffer(rest[4:1004],    dtype='<i2')  # 500 int16
-    i_raw = np.frombuffer(rest[1004:2004], dtype='<i2')  # 500 int16
-
-    # Verify CRC32 over bytes 0..2003 of `rest` (= frame bytes 4..2007)
-    rx_crc  = struct.unpack_from('<I', rest, 2004)[0]
-    calc_crc = binascii.crc32(rest[:2004]) & 0xFFFFFFFF
-    if rx_crc != calc_crc:
-        print(f"CRC mismatch! rx={rx_crc:08X} calc={calc_crc:08X}")
-        return None, None
-
-    return v_raw, i_raw
-```
+This abstraction provides magic-byte resynchronisation, CRC validation, reconnect handling, binary replay support, and compatibility across live acquisition, offline replay, and UI/runtime entrypoints.
 
 ---
 
 ## 10. Signal Processing and Feature Extraction Pipeline
 
-All DSP runs on the host PC using Python 3.10+ with NumPy, SciPy, and PyWavelets.
+In the current repository, DSP is split across two paths:
+
+- **Production path:** Teensy firmware computes the canonical 298-element feature vector and emits the packed `tflite` inference payload directly.
+- **Compatibility/parity path:** Python host code in `src/dsp/` reproduces the same preprocessing and feature extraction for raw-frame replay, validation, and hardware-in-the-loop comparison.
 
 ### 10.1 Calibration Constants
 
 ```python
-# Determined empirically from known-load measurements at first setup
-V_ADC_MIDPOINT = 2071        # ADC count at 0 V mains (= 1.668V / 0.000806 V/count)
-V_COUNTS_PER_V = 0.001720    # Volts mains per ADC count  (adjust at calibration)
-#   Derivation: 1 count = 3.3V/4096 = 0.000806V at ADC
-#               0.000806V / 0.667 (output divider) / 8.2 (AMC1301 gain) / divider_ratio
-#               = 0.000806 / 0.667 / 8.2 / 2.545e-4 ≈ 0.00172 V_mains/count
-
-I_ADC_MIDPOINT = 2048        # ADC count at 0 A (= 1.65V / 0.000806)
-I_COUNTS_PER_A = 0.030518    # Amps per ADC count
-#   Derivation: 3.3V / (4096 counts × 0.0264 V/A) = 0.03052 A/count
+# Active repository calibration contract (configs/default.yaml)
+V_ADC_MIDPOINT = 2071
+I_ADC_MIDPOINT = 2048
+V_COUNTS_PER_V = 0.579
+I_COUNTS_PER_A = 0.030518
 ```
+
+These values are consumed through `configs/default.yaml` by both the host preprocessing path and the firmware parity contract, so the report should treat the config file rather than an inline derivation as the active source of truth.
 
 ### 10.2 Preprocessing
 
 ```python
-def preprocess(v_buf, i_buf):
-    """Convert raw ADC counts to physical units, remove DC, normalise."""
-    # Step 1: Convert to physical units
-    v_phys = (v_buf.astype(np.float64) - V_ADC_MIDPOINT) * V_COUNTS_PER_V  # Volts mains
-    i_phys = (i_buf.astype(np.float64) - I_ADC_MIDPOINT) * I_COUNTS_PER_A  # Amperes
+def preprocess_frame(v_raw, i_raw, cfg):
+    v_phys = (v_raw.astype(np.float64) - cfg["calibration"]["v_adc_midpoint"]) \
+             * cfg["calibration"]["v_counts_to_volts"]
+    i_phys = (i_raw.astype(np.float64) - cfg["calibration"]["i_adc_midpoint"]) \
+             * cfg["calibration"]["i_counts_to_amps"]
 
-    # Step 2: DC offset removal (removes AMC1301 offset error and ACS758 quiescent drift)
-    v_phys -= np.mean(v_phys)
-    i_phys -= np.mean(i_phys)
+    v_phys = v_phys - np.mean(v_phys)
+    i_phys = i_phys - np.mean(i_phys)
 
-    # Step 3: Normalise for neural network input ([-1, 1] range)
-    # Use max-abs normalisation with epsilon for interruption events (near-zero signal)
-    v_norm = v_phys / (np.max(np.abs(v_phys)) + 1e-8)
-    i_norm = i_phys / (np.max(np.abs(i_phys)) + 1e-8)
+    v_norm = v_phys / max(np.max(np.abs(v_phys)), 1e-8)
+    i_norm = i_phys / max(np.max(np.abs(i_phys)), 1e-8)
 
-    return v_phys, i_phys, v_norm, i_norm
+    return {
+        "v_phys": v_phys,
+        "i_phys": i_phys,
+        "v_norm": v_norm,
+        "i_norm": i_norm,
+    }
 ```
 
 ### 10.3 Time-Domain Features
 
-```python
-import scipy.stats
+The active extractor returns 12 ordered time-domain features per channel:
 
-def time_domain_features(x):
-    """12 statistical features from a 500-sample waveform window."""
-    rms          = np.sqrt(np.mean(x**2))
-    return {
-        'rms'           : rms,
-        'mean'          : np.mean(x),               # ~0 after DC removal
-        'std'           : np.std(x),
-        'maximum'       : np.max(x),
-        'minimum'       : np.min(x),
-        'peak_to_peak'  : np.max(x) - np.min(x),
-        'crest_factor'  : np.max(np.abs(x)) / (rms + 1e-8),
-        'skewness'      : float(scipy.stats.skew(x)),
-        'kurtosis'      : float(scipy.stats.kurtosis(x)),   # excess kurtosis
-        'zero_crossings': int(np.sum(np.diff(np.sign(x)) != 0)),
-        'energy'        : float(np.sum(x**2)),
-        'total_variation': float(np.sum(np.abs(np.diff(x))))
-    }
-# 12 features per channel × 2 channels = 24 total time-domain features
+```text
+mean, std, rms, peak, crest_factor, form_factor,
+skewness, kurtosis, peak_to_peak, zero_crossings, minimum, maximum
 ```
+
+This ordering matters because the deployment feature contract uses fixed slices across firmware, Python parity tests, and TFLite inference.
 
 Physical meaning of each feature:
 - **RMS:** Core sag/swell detector (compare against nominal 230V).
@@ -880,162 +818,59 @@ Physical meaning of each feature:
 - **Skewness:** Asymmetric clipping or asymmetric sag/swell creates skewness.
 - **Kurtosis:** Transient spikes significantly increase kurtosis vs. a sinusoidal baseline.
 - **Zero crossings:** 50 Hz sine → 10 crossings/window. Harmonics increase this count predictably.
-- **Total variation:** Transients and high-order harmonics dramatically increase waveform “roughness.”
+- **Form factor / peak metrics:** These help distinguish sinusoidal, pulsed, and strongly distorted load signatures.
 
 ### 10.4 FFT-Based Harmonic Feature Extraction
 
-```python
-def harmonic_features(x, fs=5000, N=500, max_order=13):
-    """
-    Extract harmonic magnitudes, phases, and THD.
-    N=500, fs=5000 → Δf = 10 Hz, fundamental at bin 5.
-    All harmonics (50, 100, 150 Hz...) fall on exact integer bins.
-    Zero spectral leakage for stationary periodic signals.
-    """
-    X     = np.fft.rfft(x)                   # shape (251,), complex
-    freqs = np.fft.rfftfreq(N, 1.0/fs)       # [0, 10, 20, ..., 2500] Hz
+The current implementation still extracts harmonic magnitudes and phase angles for orders 1 through 13 on exact bins, but the deployment vector stores:
 
-    mag = {}  # peak amplitude of hth harmonic
-    phi = {}  # phase angle of hth harmonic (radians, relative to ZC-sync reference)
+- 13 voltage harmonic magnitudes
+- 13 current harmonic magnitudes
+- THD for voltage and current
 
-    for h in range(1, max_order + 1):
-        k = h * 5                            # bin index: h × (50 Hz / 10 Hz/bin)
-        mag[h] = (2.0 / N) * np.abs(X[k])   # two-sided to single-sided correction
-        phi[h] = float(np.angle(X[k]))       # radians, in (-π, +π]
-
-    # THD: RMS of harmonics 2..max_order normalised to RMS of fundamental
-    V1_rms         = mag[1] / np.sqrt(2)
-    harmonics_rms  = np.sqrt(sum((mag[h]/np.sqrt(2))**2 for h in range(2, max_order+1)))
-    thd            = (harmonics_rms / (V1_rms + 1e-8)) * 100.0   # percent
-
-    return mag, phi, thd
-```
-
-Feature vector contributions from this stage:
-- 13 harmonic magnitudes × 2 channels (V, I) = **26 features**
-- 2 THD values (V and I) = **2 features**
-- Phase angles are NOT added as raw values here (see Section 10.5 for correct encoding)
-- Subtotal from FFT: **28 features**
+for a **28-element `X_mag` slice** at indices `[28:56]`.
 
 ### 10.5 Phase-Aware Feature Engineering — With Correct Circular Statistics
 
-This is the core innovation. Phase angles are processed into physically meaningful, discontinuity-free, statistically correct features.
+The active repository stores phase-aware information in three groups:
 
-```python
-from scipy.stats import circmean, circstd
+- absolute phase sin/cos encoding for both channels
+- cross-channel and relative-to-fundamental phase encodings
+- circular statistics and per-harmonic active/reactive power terms
 
-def phase_aware_features(mag_v, phi_v, mag_i, phi_i, max_order=13):
-    """
-    Extract 254 phase-aware features using correct circular statistics.
-    Phase angles are NEVER included as raw values (avoids ±π discontinuity).
-    All phase statistics use scipy circular methods.
-    """
-    feats = []
+This produces a deployment `X_phase` tensor of **270 floats**, assembled as:
 
-    # ── 1. Sin/cos encoding of absolute phases (52 features) ──────────────────
-    # Replaces raw angle storage. Eliminates discontinuity at ±π.
-    for h in range(1, max_order + 1):
-        feats += [np.sin(phi_v[h]), np.cos(phi_v[h])]   # 2 per harmonic × 13 = 26 (V)
-        feats += [np.sin(phi_i[h]), np.cos(phi_i[h])]   # 2 per harmonic × 13 = 26 (I)
-    # Subtotal: 52 features
-
-    # ── 2. Inter-harmonic phase differences relative to fundamental (48 features) ──
-    for h in range(2, max_order + 1):
-        delta_v = phi_v[h] - phi_v[1]
-        delta_i = phi_i[h] - phi_i[1]
-        # Wrap to (-π, π]
-        delta_v = (delta_v + np.pi) % (2 * np.pi) - np.pi
-        delta_i = (delta_i + np.pi) % (2 * np.pi) - np.pi
-        # Sin/cos encode the wrapped difference
-        feats += [np.sin(delta_v), np.cos(delta_v)]
-        feats += [np.sin(delta_i), np.cos(delta_i)]
-    # Subtotal: 4 features × 12 orders = 48 features
-
-    # ── 3. Phase-amplitude coupling: polar form of weighted harmonic phasors (24 feats) ──
-    for h in [3, 5, 7, 9, 11, 13]:
-        r_v = mag_v[h] / (mag_v[1] + 1e-8)   # magnitude ratio
-        r_i = mag_i[h] / (mag_i[1] + 1e-8)
-        # Convert polar (r, φ) → Cartesian (r·cos, r·sin)
-        feats += [r_v * np.sin(phi_v[h]), r_v * np.cos(phi_v[h])]
-        feats += [r_i * np.sin(phi_i[h]), r_i * np.cos(phi_i[h])]
-    # Subtotal: 4 × 6 odd harmonics = 24 features
-
-    # ── 4. V-I cross-channel phase differences at each harmonic (26 features) ──
-    for h in range(1, max_order + 1):
-        cross_phi = phi_v[h] - phi_i[h]
-        cross_phi = (cross_phi + np.pi) % (2 * np.pi) - np.pi
-        feats += [np.sin(cross_phi), np.cos(cross_phi)]
-    # Subtotal: 2 × 13 = 26 features
-
-    # ── 5. Odd/even harmonic phase group statistics using CIRCULAR STATISTICS (8 feats) ──
-    odd_phi_v  = np.array([phi_v[h] for h in [3,  5,  7,  9,  11, 13]])
-    even_phi_v = np.array([phi_v[h] for h in [2,  4,  6,  8,  10, 12]])
-    odd_phi_i  = np.array([phi_i[h] for h in [3,  5,  7,  9,  11, 13]])
-    even_phi_i = np.array([phi_i[h] for h in [2,  4,  6,  8,  10, 12]])
-
-    # Use scipy circular statistics — NOT np.mean/np.std which are WRONG for angles
-    for angles in [odd_phi_v, even_phi_v, odd_phi_i, even_phi_i]:
-        cm = circmean(angles, high=np.pi, low=-np.pi)
-        cs = circstd( angles, high=np.pi, low=-np.pi)
-        feats += [cm, cs]
-    # Subtotal: 2 stats × 4 groups = 8 features
-
-    return np.array(feats)
-    # Total: 52 + 48 + 24 + 26 + 8 = 158 features
+```text
+feature_vector[0:28]   +   feature_vector[56:214]   +   feature_vector[214:298]
 ```
+
+That is the contract consumed by both the firmware model-ready frame and the Pi-side TFLite predictor.
 
 ### 10.6 Wavelet-Domain Features
 
-```python
-import pywt
+The repository’s wavelet extractor returns **42 features per channel**, not 36:
 
-def wavelet_features(x, wavelet='db4', level=5):
-    """
-    5-level DWT decomposition. 6 statistical features per subband × 6 subbands = 36 features.
-    db4 chosen for its smooth frequency response and near-symmetric impulse response.
-    """
-    coeffs = pywt.wavedec(x, wavelet, level=level)
-    # coeffs[0]=A5(approx 0-78Hz), [1]=D5(78-156Hz), ..., [5]=D1(1250-2500Hz)
-    feats = []
-    for c in coeffs:
-        feats += [
-            float(np.mean(c)),
-            float(np.std(c)),
-            float(np.sum(c**2)),              # subband energy
-            float(np.max(np.abs(c))),          # peak absolute coefficient
-            float(scipy.stats.skew(c)),
-            float(scipy.stats.kurtosis(c))     # excess kurtosis
-        ]  # 6 features per subband
-    return np.array(feats)   # 36 per channel × 2 channels = 72 total
-```
+- 36 standard statistics: 6 metrics x 6 subbands
+- 6 transient-booster features: D1/D2 energy ratios, D1/D2 max amplitudes, and TKEO summaries
 
-### 10.7 Complete Feature Vector (Corrected — 282 Elements)
+Total DWT contribution in the active vector: **84 features**.
+
+### 10.7 Complete Feature Vector (Current Repository Contract — 298 Elements)
 
 | Feature Group | Description | Count |
 | --- | --- | --- |
-| Time-domain statistics | RMS, crest factor, kurtosis, etc. | 24 |
-| FFT harmonic magnitudes h=1..13 | V + I channels | 26 |
-| THD | V and I | 2 |
-| Phase sin/cos encoding | V + I, h=1..13, 2 per harmonic per channel | 52 |
-| Inter-harmonic phase differences | V + I, h=2..13, sin/cos encoded | 48 |
-| Phase-amplitude coupling (polar form) | V + I, odd harmonics h=3,5,7,9,11,13 | 24 |
-| V-I cross-channel phase | h=1..13, sin/cos encoded | 26 |
-| Circular phase statistics | odd/even groups, V+I, circmean+circstd | 8 |
-| DWT subband features (6 subbands × 6 stats) | V + I channels | 72 |
-| **TOTAL** |  | **282** |
+| Time-domain statistics | 12 voltage + 12 current | 24 |
+| Overall power metrics | apparent, active, reactive, power factor | 4 |
+| FFT magnitudes + THD | 13 V + 13 I + THD_V + THD_I | 28 |
+| Absolute phase encoding | sin/cos for 13 V and 13 I harmonics | 52 |
+| Cross-channel phase encoding | sin/cos for 13 V-I phase differences | 26 |
+| Relative-to-fundamental phase encoding | sin/cos for h=2..13 on V and I | 48 |
+| Per-harmonic power terms | active + reactive power for h=1..13 | 26 |
+| Circular phase statistics | V, I, and cross-phase circmean/circstd | 6 |
+| DWT features | 42 voltage + 42 current | 84 |
+| **TOTAL** |  | **298** |
 
-**Note:** Raw phase angles (26 values) are intentionally EXCLUDED from the feature vector. They are redundant with the sin/cos encoding in Group 4 and introduce ±π discontinuity that the sin/cos encoding was designed to avoid. The feature vector has 282 elements, not 308.
-
-All 282 features are z-score standardised using statistics computed over the training set:
-
-```python
-from sklearn.preprocessing import StandardScaler
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_val_scaled   = scaler.transform(X_val)
-X_test_scaled  = scaler.transform(X_test)
-# Save scaler for inference: joblib.dump(scaler, 'scaler.pkl')
-```
+The deployment contract used across firmware, host parity testing, config, and TFLite inference is therefore **298**, while the older 282-feature transport is now explicitly a legacy compatibility path.
 
 ---
 
@@ -1043,9 +878,9 @@ X_test_scaled  = scaler.transform(X_test)
 
 ### 11.1 Baseline Model — Magnitude-Only MLP (M1)
 
-The baseline uses only magnitude features (no phase, no DWT) to establish a lower bound:
+The baseline uses only phase-free features (no phase encoding, no DWT) to establish a lower bound:
 
-- **Input:** 24 time-domain + 26 FFT magnitudes + 2 THD = 52 features
+- **Input:** 24 time-domain + 4 overall power metrics + 26 FFT magnitudes + 2 THD = 56 features
 - **Architecture:** Dense(128, ReLU) → Dropout(0.3) → Dense(64, ReLU) → Dropout(0.3) → Dense(7, Softmax)
 - **Parameters:** ~16,000
 - **Purpose:** Establishes what accuracy is achievable with conventional magnitude-centric approaches
@@ -1081,7 +916,7 @@ Branch1 output: (64,) — temporal + convolutional features
 ### Branch 2 — Magnitude Feature MLP
 
 ```
-Input: (28,) — time-domain stats + FFT magnitudes + THD (from X_scaled)
+Input: (28,) — canonical `X_mag` slice = FFT magnitudes + THD
     │
 Dense(64, ReLU) → Dropout(0.2) → Dense(32, ReLU)
     │
@@ -1091,8 +926,8 @@ Branch2 output: (32,)
 ### Branch 3 — Phase + DWT Feature MLP
 
 ```
-Input: (254,) — 158 phase features + 72 DWT features + 24 time-domain stats (reused)
-Note: 158 + 72 + 24 = 254 (time-domain stats shared with Branch2 for phase context)
+Input: (270,) — `X_phase` = features[0:28] ++ features[56:214] ++ features[214:298]
+Note: this includes time-domain stats + power metrics (28), phase blocks (158), and DWT features (84)
     │
 Dense(128, ReLU) → Dropout(0.3) → Dense(64, ReLU)
     │
@@ -1121,7 +956,7 @@ Total trainable parameters: approximately 280,000 — trainable on CPU in under 
 import tensorflow as tf
 from tensorflow.keras import layers, Model, Input
 
-def build_phase_aware_model(n_samples=500, n_phase_dwt_feats=254, n_mag_feats=28):
+def build_phase_aware_model(n_samples=500, n_phase_dwt_feats=270, n_mag_feats=28):
     # ── Branch 1: Raw waveform CNN-LSTM ──────────────────────────────────────
     waveform_in = Input(shape=(n_samples, 2), name='waveform_input')
     x = layers.Conv1D(32, 7, padding='same', activation=None)(waveform_in)
@@ -1330,7 +1165,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 import joblib
 
-# Assume: X_wave (38500, 500, 2), X_mag (38500, 28), X_phase (38500, 254), y (38500,)
+# Assume: X_wave (38500, 500, 2), X_mag (38500, 28), X_phase (38500, 270), y (38500,)
 # Integer labels 0–6 → one-hot
 y_onehot = tf.keras.utils.to_categorical(y, num_classes=7)
 
@@ -1341,8 +1176,8 @@ scaler_phase = StandardScaler().fit(X_phase_train)
 X_mag_train_s   = scaler_mag.transform(X_mag_train)
 X_phase_train_s = scaler_phase.transform(X_phase_train)
 
-joblib.dump(scaler_mag,   'scaler_mag.pkl')
-joblib.dump(scaler_phase, 'scaler_phase.pkl')
+joblib.dump(scaler_mag,   'artifacts/scalers/scaler_mag_v1.pkl')
+joblib.dump(scaler_phase, 'artifacts/scalers/scaler_phase_v1.pkl')
 ```
 
 ### 13.2 Training Configuration
@@ -1364,7 +1199,7 @@ callbacks = [
         monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6
     ),
     tf.keras.callbacks.ModelCheckpoint(
-        'best_model.keras', monitor='val_accuracy', save_best_only=True
+        'artifacts/runs/best_model.keras', monitor='val_accuracy', save_best_only=True
     ),
     tf.keras.callbacks.TensorBoard(log_dir='./tb_logs')
 ]
@@ -1394,7 +1229,7 @@ y_pred       = np.argmax(y_pred_probs, axis=1)
 y_true       = np.argmax(y_test_onehot, axis=1)
 
 class_names = ['Normal', 'Sag', 'Swell', 'Interruption',
-               'Harmonic', 'Transient', 'Flicker']
+               'HarmonicDistortion', 'Transient', 'Flicker']
 
 print(classification_report(y_true, y_pred, target_names=class_names))
 
@@ -1634,7 +1469,7 @@ uint32_t crc = computeCRC32(&seqNum, ...);  // CRC over N+1, not N — MISMATCH!
 
 **Risk:** The sin/cos encoding was introduced specifically to avoid the ±π discontinuity in raw angle representation. Including raw angles reintroduces this discontinuity. Additionally, the features are linearly redundant: raw_angle → (sin, cos) is invertible, so the model receives redundant information that increases input dimensionality without additional information content, wasting model capacity.
 
-**Fix:** Exclude raw phase angles from the feature vector. Use only sin/cos encoded versions. Reduces feature vector from 308 to 282 elements.
+**Fix:** Exclude raw phase angles from the feature vector. Use only sin/cos encoded versions. In the current repository, the active deployment vector is 298 elements because it also includes overall power metrics, per-harmonic power terms, and expanded DWT/transient-booster features.
 
 ---
 
@@ -1911,25 +1746,24 @@ If any component smokes, sparks, or emits unusual odour:
 | Week | Milestone | Owner | Deliverable / Verification |
 | --- | --- | --- | --- |
 | 1 | Theory & specifications complete | Rayan | Documented class definitions, harmonic parameter ranges, IEEE 519 limit table |
-| 1 | Python synthetic signal generator (all 7 classes, load-specific phase distributions) | Japeth | `synthetic_generator.py` with Von Mises phase sampling for Class 4 subtypes |
-| 2 | Time-domain + FFT feature extraction with N=500 | Yashas | `feature_extractor.py` — unit tests confirm harmonic magnitudes AND phases correct on synthetic known-phase test signals |
-| 2 | Baseline MLP model (M1) trained and evaluated | Japeth | Confusion matrix, accuracy vs SNR table for M1 |
-| 3 | Phase-aware features with correct circular statistics | Yashas | `phase_features.py` — verified with circular mean test: mean([+175°, -175°]) ≈ ±180°, not 0° |
-| 3 | DWT feature extraction | Yashas | `wavelet_features.py` — energy-frequency validation per subband |
-| 4 | CNN-LSTM model (M4) implemented and trained | Japeth | Model summary, training curves, M1–M4 ablation accuracy table |
-| 4 | Full ablation study (M1–M4 × V-only/I-only/V+I) | Japeth | Accuracy table (12 conditions), confusion matrices, ablation bar chart |
+| 1 | ML subsystem specification handed off | Japeth | `docs/model_prd.md` and `tasks.md` define synthetic generation, training, export, and ablation deliverables |
+| 2 | Host preprocessing + feature parity established | Yashas | `src/dsp/preprocess.py`, `src/dsp/features.py`, and tests lock the 298-feature contract |
+| 2 | Baseline MLP model (M1) plan defined | Japeth | Research model inputs and artifact contract documented in `docs/model_prd.md` |
+| 3 | Phase-aware features with circular statistics finalised | Yashas | Python and firmware DSP layouts aligned; parity covered by tests |
+| 3 | DWT feature extraction with transient boosters finalised | Yashas | `src/dsp/wavelet_features.py` and firmware DSP parity checks |
+| 4 | CNN-LSTM/TFLite deployment contract frozen | All | `X_wave`, `X_mag`, and `X_phase` tensor slicing fixed for export/runtime interoperability |
 | 5 | B0505S + AMC1301 circuit assembled on perfboard | Yash | Scope output tracks 230V waveform shape and scale correctly |
 | 5 | ACS758 circuit assembled and tested | Yash | Output voltage at known test current verified |
-| 6 | Teensy firmware complete: dual-ADC, ZC sync, USB serial with correct CRC | Yash | `pq_firmware.ino` — captured frames pass CRC check in Python on 100 consecutive frames |
-| 6 | Python USB receiver + preprocessing complete | Yashas | Real-time waveform display on PC from hardware |
-| 7 | Real waveform FFT validation | Rayan + Yashas | Captured FFT from LED lamp matches expected harmonic signature (3rd dominant, characteristic phase) |
-| 7 | End-to-end pipeline integration test | All | Real hardware → USB → features → trained model → classification displayed in real time |
+| 6 | Teensy firmware complete: dual-ADC, ZC sync, CRC, model-ready frame transport | Yash | `firmware/teensy/pq_firmware/src/main.cpp` streams valid raw and `tflite` frames |
+| 6 | Receiver/runtime integration complete | Yashas | `src/io/serial_receiver.py`, `src/runtime/pipeline.py`, `src/infer/live_infer.py` |
+| 7 | Real waveform FFT validation | Rayan + Yashas | Captured FFT from LED lamp matches expected harmonic signature |
+| 7 | End-to-end pipeline integration test | All | Real hardware → runtime pipeline → dashboard / logs / inference |
 | 8 | Real data collection: Load A, B, C (100–200 windows/class minimum) | Rayan + Yash | Labelled dataset of real hardware measurements |
-| 8 | Domain adaptation fine-tuning | Japeth | Accuracy comparison before/after fine-tuning on real data |
-| 9 | Results compilation | All | Final accuracy tables, confusion matrices, representative waveform and FFT plots |
+| 8 | Domain adaptation and export | Japeth | Accuracy comparison before/after fine-tuning plus deployable `.tflite` artifact |
+| 9 | Pi kiosk packaging and deployment | All | `src/ui/app.py`, `src/system/kiosk_setup.sh`, `pq-monitor.service`, log rotation |
 | 9 | Report first draft | All | Sections distributed per team role |
 | 10 | Report review, revision, finalisation | All | Final project report |
-| 10 | Demo preparation and rehearsal | All | Slide deck + live demo script + fallback offline demo (recorded waveforms) |
+| 10 | Demo preparation and rehearsal | All | Slide deck + live demo script + offline replay fallback |
 
 ---
 
@@ -1960,8 +1794,8 @@ The current design measures one phase voltage and one load current. Three-phase 
 **Extension 1 — Three-Phase System:**
 Add three AMC1301 channels (one per phase voltage, each with dedicated B0505S) and three ACS758 channels. Enables sequence component analysis (positive/negative/zero sequence), unbalance detection, and detection of negative-sequence harmonics (5th, 11th) that cause motor heating.
 
-**Extension 2 — Embedded Inference:**
-Compress the trained CNN-LSTM using TFLite quantisation (INT8 weights, 4× size reduction) and deploy on Raspberry Pi 4 or 5. Eliminates PC dependency for field deployment. TFLite Micro for Cortex-M7 may be feasible for the MLP baseline; the full CNN-LSTM benefits from Raspberry Pi compute.
+**Extension 2 — Further Edge Optimisation:**
+The current repository already deploys the exported TFLite model on a Raspberry Pi 5 kiosk runtime. Future work is to optimise this path further by preferring `tflite_runtime` on target, trimming compatibility-only paths, and exploring whether smaller research variants can move closer to the microcontroller.
 
 **Extension 3 — Wireless Monitoring Network:**
 Replace USB cable with ESP32 module (UART-to-WiFi bridge). Multiple nodes report to a central MQTT broker; Node-RED or Grafana dashboard for visualisation. Enables simultaneous multi-point monitoring for harmonic source localisation.
@@ -2019,17 +1853,15 @@ Replace or augment the LSTM branch with a multi-head self-attention layer (Trans
 
 ```bash
 # Create virtual environment
-python3.10 -m venv pq_env
-source pq_env/bin/activate     # Linux/Mac
-# pq_env\Scripts\activate      # Windows
+python3 -m venv .venv
+. .venv/bin/activate
 
-# Install dependencies
-pip install numpy scipy pyserial pywavelets scikit-learn tensorflow matplotlib seaborn joblib
+# Install repository dependencies
+pip install -r requirements.txt
 
-# Verify key package versions
-python -c "import tensorflow as tf; print(tf.__version__)"          # should be >= 2.13
-python -c "import scipy; print(scipy.__version__)"                   # should be >= 1.10
-python -c "import pywt; print(pywt.__version__)"                     # should be >= 1.4
+# Quick validation
+.venv/bin/python scripts/smoke_test.py
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
 
 ---
@@ -2046,17 +1878,18 @@ python -c "import pywt; print(pywt.__version__)"                     # should be
 
 **Software (before connecting Teensy):**
 - [ ] Python environment activated
-- [ ] `scaler_mag.pkl`, `scaler_phase.pkl`, `best_model.keras` in working directory
+- [ ] `configs/default.yaml` present and reviewed
+- [ ] `artifacts/models/pqm_multilabel_model.tflite` available for production inference
 - [ ] Correct serial port identified (`ls /dev/ttyACM*` on Linux)
-- [ ] Python receiver script runs without errors on dummy/recorded data
+- [ ] `scripts/smoke_test.py` runs without errors
 
 **First power-on sequence:**
 1. Connect Teensy USB (no mains yet)
 2. Verify Teensy VUSB = 5V and 3V3 = 3.3V with DMM
 3. Connect mains through 1A fuse with NO LOAD
 4. Verify ADC counts near 2071 (voltage channel quiescent) and 2048 (current channel)
-5. Connect Load A; verify sinusoidal current waveform on Python display
-6. Run classifier; verify “Normal” output
+5. Launch the UI or CLI runtime in `tflite` mode and verify live updates
+6. Run classifier; verify `Normal` output and healthy runtime status
 
 ---
 
