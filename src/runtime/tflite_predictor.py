@@ -14,10 +14,22 @@ def _default_interpreter_factory(model_path: str, num_threads: int):
         return tflite.Interpreter(model_path=model_path, num_threads=num_threads)
     except ModuleNotFoundError:
         try:
+            from ai_edge_litert.interpreter import Interpreter as LiteRTInterpreter
+
+            # LiteRT is the current Google-distributed lightweight runtime.
+            # Some releases accept num_threads, while others only accept model_path.
+            try:
+                return LiteRTInterpreter(model_path=model_path, num_threads=num_threads)
+            except TypeError:
+                return LiteRTInterpreter(model_path=model_path)
+        except ModuleNotFoundError:
+            pass
+
+        try:
             import tensorflow as tf
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "TFLite inference requires either tflite_runtime or tensorflow to be installed"
+                "TFLite inference requires tflite_runtime, ai-edge-litert, or tensorflow to be installed"
             ) from exc
         return tf.lite.Interpreter(model_path=model_path, num_threads=num_threads)
 

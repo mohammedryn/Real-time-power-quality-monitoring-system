@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import builtins
+import sys
+import types
+
 import numpy as np
 import pytest
 
 from src.runtime.tflite_predictor import TFLitePredictor
+import src.runtime.tflite_predictor as predictor_mod
 
 
 class FakeInterpreter:
@@ -89,3 +94,38 @@ def test_tflite_predictor_rejects_wrong_feature_length(tmp_path) -> None:
             v_norm=np.zeros(500, dtype=np.float32),
             i_norm=np.zeros(500, dtype=np.float32),
         )
+
+
+def test_default_factory_falls_back_to_ai_edge_litert(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "model.tflite"
+    model_path.write_bytes(b"TFL3")
+
+    class FakeLiteRTInterpreter:
+        def __init__(self, *, model_path: str, num_threads: int | None = None) -> None:
+            self.model_path = model_path
+            self.num_threads = num_threads
+
+    fake_pkg = types.ModuleType("ai_edge_litert")
+    fake_interpreter_mod = types.ModuleType("ai_edge_litert.interpreter")
+    fake_interpreter_mod.Interpreter = FakeLiteRTInterpreter
+    fake_pkg.interpreter = fake_interpreter_mod
+
+    monkeypatch.setitem(sys.modules, "ai_edge_litert", fake_pkg)
+    monkeypatch.setitem(sys.modules, "ai_edge_litert.interpreter", fake_interpreter_mod)
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tflite_runtime.interpreter":
+            raise ModuleNotFoundError("No module named 'tflite_runtime'")
+        if name == "tensorflow":
+            raise ModuleNotFoundError("No module named 'tensorflow'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    interpreter = predictor_mod._default_interpreter_factory(str(model_path), 4)
+
+    assert isinstance(interpreter, FakeLiteRTInterpreter)
+    assert interpreter.model_path == str(model_path)
+    assert interpreter.num_threads == 4
