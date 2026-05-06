@@ -26,11 +26,12 @@ FRAME_SIZE    = 4 + _RAW_PAYLOAD + 4        # 2012 bytes
 _FEAT_PAYLOAD = 2 + 2 + (N_FEATURES * 4)
 FEATURE_FRAME_SIZE = 4 + _FEAT_PAYLOAD + 4  # 1140 bytes
 
-# Model-ready frame type tag (occupies the same 2-byte "n" field; value 3
+# Inference frame type tag (occupies the same 2-byte "n" field; value 3
 # does not collide with N_SAMPLES=500 or N_FEATURES=282).
-MODEL_READY_FRAME_TYPE = 0x0003
+INFERENCE_FRAME_TYPE = 0x0003
+MODEL_READY_FRAME_TYPE = INFERENCE_FRAME_TYPE
 
-# Model-ready frame layout:
+# Inference frame layout:
 #   [magic 4B BE][seq 2B LE][type 2B LE=0x0003]
 #   [X_wave 4000B: v_norm(500 f32) + i_norm(500 f32)]
 #   [X_mag  112B:  28 f32]
@@ -41,7 +42,7 @@ _N_XWAVE_FLOATS  = 1000   # v_norm[500] + i_norm[500]
 _N_XMAG_FLOATS   = 28
 _N_XPHASE_FLOATS = 270
 
-_MODEL_PAYLOAD = (
+_INFERENCE_PAYLOAD = (
     2                          # seq
     + 2                        # type
     + _N_XWAVE_FLOATS  * 4    # X_wave
@@ -49,15 +50,18 @@ _MODEL_PAYLOAD = (
     + _N_XPHASE_FLOATS * 4    # X_phase
 )                              # = 5196 bytes
 
-MODEL_READY_FRAME_SIZE = 4 + _MODEL_PAYLOAD + 4   # 5204 bytes
+_MODEL_PAYLOAD = _INFERENCE_PAYLOAD
+
+INFERENCE_FRAME_SIZE = 4 + _INFERENCE_PAYLOAD + 4   # 5204 bytes
+MODEL_READY_FRAME_SIZE = INFERENCE_FRAME_SIZE
 
 # Valid "n" values and their corresponding total frame sizes.
-# The model-ready frame uses type=3 in the "n" field; add it here so that
+# The inference frame uses type=3 in the "n" field; add it here so that
 # iter_frames_from_bytes() can identify and size it correctly.
 _FRAME_SIZE_FOR_N: dict[int, int] = {
     N_SAMPLES:              FRAME_SIZE,
     N_FEATURES:             FEATURE_FRAME_SIZE,
-    MODEL_READY_FRAME_TYPE: MODEL_READY_FRAME_SIZE,
+    INFERENCE_FRAME_TYPE:   INFERENCE_FRAME_SIZE,
 }
 
 # ---- Data classes ------------------------------------------------------------
@@ -90,10 +94,10 @@ class FeatureFrame:
 
 
 @dataclass
-class ModelReadyFrame:
-    """Frame produced by the Teensy model-ready DSP pipeline.
+class InferenceFrame:
+    """Frame produced by the Teensy inference-ready DSP pipeline.
 
-    Contains three arrays that are fed directly to model_4:
+    Contains three arrays that are fed directly to the Pi-side inference stack:
       X_wave  – peak-normalised waveform (500, 2) after reshape
       X_mag   – harmonic magnitude features (28,)
       X_phase – phase + wavelet features   (270,)
@@ -116,6 +120,9 @@ class ModelReadyFrame:
     @property
     def i_norm(self) -> np.ndarray:
         return self.X_wave[500:]
+
+
+ModelReadyFrame = InferenceFrame
 
 
 @dataclass
@@ -204,15 +211,15 @@ def parse_feature_frame(frame: bytes) -> FeatureFrame:
                         rx_crc=rx_crc, calc_crc=calc_crc)
 
 
-# ---- Model-ready frame pack / parse -----------------------------------------
+# ---- Inference frame pack / parse -------------------------------------------
 
-def pack_model_ready_frame(
+def pack_inference_frame(
     seq: int,
     X_wave: np.ndarray,   # shape (1000,) = v_norm[500] + i_norm[500]
     X_mag: np.ndarray,    # shape (28,)
     X_phase: np.ndarray,  # shape (270,)
 ) -> bytes:
-    """Pack a model-ready frame (5204 bytes)."""
+    """Pack an inference frame (5204 bytes)."""
     xw = np.asarray(X_wave,  dtype="<f4").reshape(-1)
     xm = np.asarray(X_mag,   dtype="<f4").reshape(-1)
     xp = np.asarray(X_phase, dtype="<f4").reshape(-1)
@@ -224,7 +231,7 @@ def pack_model_ready_frame(
         raise ValueError(f"X_phase must have {_N_XPHASE_FLOATS} floats, got {len(xp)}")
 
     payload = (
-        struct.pack("<HH", seq & 0xFFFF, MODEL_READY_FRAME_TYPE)
+        struct.pack("<HH", seq & 0xFFFF, INFERENCE_FRAME_TYPE)
         + xw.tobytes()
         + xm.tobytes()
         + xp.tobytes()
@@ -233,20 +240,20 @@ def pack_model_ready_frame(
     return MAGIC_BYTES + payload + struct.pack("<I", crc)
 
 
-def parse_model_ready_frame(frame: bytes) -> ModelReadyFrame:
-    """Parse a 5204-byte model-ready frame."""
-    if len(frame) != MODEL_READY_FRAME_SIZE:
+def parse_inference_frame(frame: bytes) -> InferenceFrame:
+    """Parse a 5204-byte inference frame."""
+    if len(frame) != INFERENCE_FRAME_SIZE:
         raise ValueError(
-            f"Invalid model-ready frame length {len(frame)}; "
-            f"expected {MODEL_READY_FRAME_SIZE}")
+            f"Invalid inference frame length {len(frame)}; "
+            f"expected {INFERENCE_FRAME_SIZE}")
     if frame[:4] != MAGIC_BYTES:
         raise ValueError("Invalid magic header")
 
-    payload = frame[4:4 + _MODEL_PAYLOAD]
+    payload = frame[4:4 + _INFERENCE_PAYLOAD]
     seq, ftype = struct.unpack_from("<HH", payload, 0)
-    if ftype != MODEL_READY_FRAME_TYPE:
+    if ftype != INFERENCE_FRAME_TYPE:
         raise ValueError(f"Invalid frame type {ftype:#06x}; "
-                         f"expected {MODEL_READY_FRAME_TYPE:#06x}")
+                         f"expected {INFERENCE_FRAME_TYPE:#06x}")
 
     offset = 4
     xw_bytes = offset + _N_XWAVE_FLOATS  * 4
@@ -257,10 +264,10 @@ def parse_model_ready_frame(frame: bytes) -> ModelReadyFrame:
     X_mag   = np.frombuffer(payload[xw_bytes:xm_bytes], dtype="<f4").copy()
     X_phase = np.frombuffer(payload[xm_bytes:xp_bytes], dtype="<f4").copy()
 
-    rx_crc   = struct.unpack_from("<I", frame, 4 + _MODEL_PAYLOAD)[0]
+    rx_crc   = struct.unpack_from("<I", frame, 4 + _INFERENCE_PAYLOAD)[0]
     calc_crc = compute_crc(payload)
 
-    return ModelReadyFrame(
+    return InferenceFrame(
         seq=seq,
         X_wave=X_wave,
         X_mag=X_mag,
@@ -270,8 +277,23 @@ def parse_model_ready_frame(frame: bytes) -> ModelReadyFrame:
     )
 
 
+def pack_model_ready_frame(
+    seq: int,
+    X_wave: np.ndarray,
+    X_mag: np.ndarray,
+    X_phase: np.ndarray,
+) -> bytes:
+    """Backward-compatible alias for inference frame packing."""
+    return pack_inference_frame(seq, X_wave, X_mag, X_phase)
+
+
+def parse_model_ready_frame(frame: bytes) -> InferenceFrame:
+    """Backward-compatible alias for inference frame parsing."""
+    return parse_inference_frame(frame)
+
+
 # ---- Variable-length iterator -----------------------------------------------
-# Handles mixed raw (n=500), feature (n=282), and model-ready (type=3) frames.
+# Handles mixed raw (n=500), feature (n=282), and inference (type=3) frames.
 
 def iter_frames_from_bytes(blob: bytes) -> Iterator[bytes]:
     idx      = 0
@@ -328,11 +350,11 @@ def validate_recorded_stream(path: str | Path,
         _seq, n = struct.unpack_from("<HH", frame_bytes, 4)
         try:
             if n == N_SAMPLES:
-                parsed: Union[ParsedFrame, FeatureFrame, ModelReadyFrame] = parse_frame(frame_bytes)
+                parsed: Union[ParsedFrame, FeatureFrame, InferenceFrame] = parse_frame(frame_bytes)
             elif n == N_FEATURES:
                 parsed = parse_feature_frame(frame_bytes)
-            elif n == MODEL_READY_FRAME_TYPE:
-                parsed = parse_model_ready_frame(frame_bytes)
+            elif n == INFERENCE_FRAME_TYPE:
+                parsed = parse_inference_frame(frame_bytes)
             else:
                 continue
         except ValueError:

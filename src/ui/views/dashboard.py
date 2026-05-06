@@ -95,7 +95,9 @@ class DashboardView(QtWidgets.QWidget):
         self._timestamp.setText(f"Updated: {ts_text}")
 
         if snapshot.v_phys is not None and snapshot.i_phys is not None:
-            self._waveforms.update_waveforms(snapshot.v_phys, snapshot.i_phys, self._fs_hz)
+            self._waveforms.update_waveforms(snapshot.v_phys, snapshot.i_phys, self._fs_hz, normalized=False)
+        elif snapshot.v_norm is not None and snapshot.i_norm is not None:
+            self._waveforms.update_waveforms(snapshot.v_norm, snapshot.i_norm, self._fs_hz, normalized=True)
 
         self._harmonics.update_harmonics(snapshot.harmonics_v, snapshot.harmonics_i)
         self._probabilities.update_probabilities(

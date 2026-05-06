@@ -10,6 +10,7 @@ This plan is designed so any AI coding agent can execute the whole project with 
 5. Save all outputs under artifacts with run IDs.
 6. Preserve handheld target: Raspberry Pi 5 (8GB) + Pi display with touch-first UI.
 7. Preserve real-time targets: responsive UI and non-blocking acquisition/inference.
+8. Treat `tflite` as the public live mode; legacy `feature`/`raw` paths are compatibility or debug only.
 
 ## Chunk 0: Project Bootstrap and Cleanup
 ### Tasks
@@ -68,18 +69,19 @@ This plan is designed so any AI coding agent can execute the whole project with 
 3. tests/test_receiver_resync.py
 4. tests/test_preprocess.py
 
-## Chunk 3: Report-Aligned Feature Extraction (282)
+## Chunk 3: Report-Aligned Feature Extraction (298)
 ### Tasks
 1. Implement time-domain feature extractor (24 total across V/I).
-2. Implement harmonic magnitude+phase extraction for h=1..13 using N=500 bins.
-3. Implement THD calculations for V and I.
-4. Implement phase-aware feature block with sin/cos, wrapped deltas, V-I cross, coupling.
-5. Implement circular statistics using scipy circmean/circstd.
-6. Implement DWT features exactly sized to 72 across V/I.
-7. Build final vector assembler and schema validator enforcing length 282.
+2. Implement overall power metrics block: apparent power, active power, reactive power, power factor.
+3. Implement harmonic magnitude+phase extraction for h=1..13 using N=500 bins.
+4. Implement THD calculations for V and I.
+5. Implement phase-aware feature block with sin/cos, wrapped deltas, V-I cross, coupling, and per-harmonic power.
+6. Implement circular statistics using scipy circmean/circstd.
+7. Implement DWT features exactly sized to 84 across V/I, including transient-booster statistics.
+8. Build final vector assembler and schema validator enforcing length 298.
 
 ### Acceptance Criteria
-1. Unit test confirms feature length is exactly 282 for random valid frame.
+1. Unit test confirms feature length is exactly 298 for random valid frame.
 2. Circular statistics tests pass edge case angles near +-pi.
 3. Harmonic bin test confirms 50Hz->bin5 and 13th->bin65 at fs=5000,N=500.
 
@@ -115,7 +117,7 @@ This plan is designed so any AI coding agent can execute the whole project with 
 1. Implement M1 baseline magnitude MLP.
 2. Implement M2 waveform-only model.
 3. Implement M3 waveform+magnitude model.
-4. Implement M4 full phase-aware hybrid model per report.
+4. Implement the full phase-aware hybrid model per report (historical research label `M4`; production runtime term is `tflite`).
 5. Add factory method to instantiate by variant id.
 6. Add model summary export per variant.
 
@@ -139,6 +141,7 @@ This plan is designed so any AI coding agent can execute the whole project with 
 3. Add callbacks: checkpoint, early stop, LR reduce, tensorboard optional.
 4. Save run manifest with hashes, config snapshot, metrics.
 5. Save training curves and confusion matrices automatically.
+6. Export the deployable artifact to `artifacts/models/pqm_multilabel_model.tflite`.
 
 ### Acceptance Criteria
 1. End-to-end training run completes for at least one variant.
@@ -149,7 +152,8 @@ This plan is designed so any AI coding agent can execute the whole project with 
 1. src/train/train.py
 2. src/eval/evaluate.py
 3. artifacts/runs/<run_id>/...
-4. tests/test_train_smoke.py
+4. artifacts/models/pqm_multilabel_model.tflite
+5. tests/test_train_smoke.py
 
 ## Chunk 7: Ablation Study Automation
 ### Tasks
@@ -161,7 +165,7 @@ This plan is designed so any AI coding agent can execute the whole project with 
 ### Acceptance Criteria
 1. All variants train/evaluate under one command.
 2. Aggregated results file exists and is human-readable.
-3. M3 vs M4 comparison computed and highlighted.
+3. M3 vs the phase-aware hybrid variant (historically M4) comparison computed and highlighted.
 
 ### Deliverables
 1. src/eval/ablation.py
@@ -191,9 +195,10 @@ This plan is designed so any AI coding agent can execute the whole project with 
 ## Chunk 9: Live Inference Integration
 ### Tasks
 1. Implement live inference pipeline from serial receiver to model output.
-2. Add optional fallback mode using recorded frames.
-3. Display class probabilities and top-1 prediction with timestamp.
-4. Add rolling log writer for session analysis.
+2. Make `tflite` the public live runtime mode and document any `feature` replay support as legacy compatibility only.
+3. Add optional fallback mode using recorded frames.
+4. Display class probabilities and top-1 prediction with timestamp.
+5. Add rolling log writer for session analysis.
 
 ### Acceptance Criteria
 1. Live script runs continuously and emits predictions per frame.
@@ -313,7 +318,7 @@ This plan is designed so any AI coding agent can execute the whole project with 
 3. Run synthetic dataset generation.
 4. Run feature extractor tests.
 5. Run M1-M4 ablation training.
-6. Run evaluation and artifact export.
+6. Run evaluation and export `artifacts/models/pqm_multilabel_model.tflite`.
 7. Run live/offline inference smoke tests.
 8. Run report alignment generator.
 

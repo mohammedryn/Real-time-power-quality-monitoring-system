@@ -11,17 +11,6 @@
 
 ---
 
-## Team
-
-| Name | USN | Role | Primary Responsibility |
-| --- | --- | --- | --- |
-| Mohammed Rayan | — | Power Quality, Harmonics & Embedded Lead | Standards, theory, real-data validation, , firmware, ADC interface |
-| Yash | — | Hardware Lead | Circuit design interface |
-| Yashas | — | DSP & Feature Engineering Lead | FFT pipeline, phase features, wavelet features |
-| Japeth | — | Deep Learning Lead | Model architecture, training, ablation studies |
-
----
-
 ## Table of Contents
 
 1. [Abstract](about:blank#1-abstract)

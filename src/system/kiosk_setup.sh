@@ -11,24 +11,19 @@ Options:
   --user USER            Service user (default: pi)
   --port DEVICE          Serial device path (default: /dev/ttyACM0)
   --config PATH          Config path relative to repo (default: configs/default.yaml)
-  --receiver-mode MODE   feature or raw (default: feature)
+  --receiver-mode MODE   tflite or raw (default: tflite)
   --model PATH           Model artifact path relative to repo
-  --scaler PATH          Scaler artifact path relative to repo
 EOF
 }
 
 build_exec_start() {
   local repo_root="$1"
   local model_path="${2:-}"
-  local scaler_path="${3:-}"
   local exec_start
 
   exec_start="$repo_root/.venv/bin/python -m src.ui.app --port \${PQ_SERIAL_PORT} --config \${PQ_CONFIG_PATH} --receiver-mode \${PQ_RECEIVER_MODE}"
   if [[ -n "$model_path" ]]; then
     exec_start+=" --model \${PQ_MODEL_PATH}"
-  fi
-  if [[ -n "$scaler_path" ]]; then
-    exec_start+=" --scaler \${PQ_SCALER_PATH}"
   fi
 
   printf '%s\n' "$exec_start"
@@ -39,9 +34,8 @@ main() {
   local RUN_USER="pi"
   local SERIAL_PORT="/dev/ttyACM0"
   local CONFIG_PATH="configs/default.yaml"
-  local RECEIVER_MODE="feature"
+  local RECEIVER_MODE="tflite"
   local MODEL_PATH=""
-  local SCALER_PATH=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,8 +51,6 @@ main() {
         RECEIVER_MODE="$2"; shift 2 ;;
       --model)
         MODEL_PATH="$2"; shift 2 ;;
-      --scaler)
-        SCALER_PATH="$2"; shift 2 ;;
       -h|--help)
         usage; exit 0 ;;
       *)
@@ -100,11 +92,10 @@ PQ_SERIAL_PORT=$SERIAL_PORT
 PQ_CONFIG_PATH=$CONFIG_PATH
 PQ_RECEIVER_MODE=$RECEIVER_MODE
 PQ_MODEL_PATH=$MODEL_PATH
-PQ_SCALER_PATH=$SCALER_PATH
 EOF
 
   local EXEC_START
-  EXEC_START="$(build_exec_start "$REPO_ROOT" "$MODEL_PATH" "$SCALER_PATH")"
+  EXEC_START="$(build_exec_start "$REPO_ROOT" "$MODEL_PATH")"
 
   sed \
     -e "s|^User=.*$|User=$RUN_USER|" \

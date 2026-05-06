@@ -6,7 +6,9 @@ This repository preserves the fixed acquisition and feature contract used by the
 
 - Sampling rate: `fs = 5000 Hz`
 - Samples per frame: `N = 500`
-- Feature vector length: `282`
+- Feature vector length: `298`
+- Production model artifact: `artifacts/models/pqm_multilabel_model.tflite`
+- Public live mode: `tflite`
 - Serial frame compatibility is defined in `src/io/frame_protocol.py`
 
 ## Environment Setup
@@ -37,19 +39,20 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 .venv/bin/python -m src.ui.app \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature
+  --receiver-mode tflite
 ```
 
-Optional model and scaler artifacts can be supplied when available:
+Production live inference should point at the canonical TFLite artifact:
 
 ```bash
 .venv/bin/python -m src.ui.app \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature \
-  --model artifacts/models/pq_model.joblib \
-  --scaler artifacts/scalers/pq_scaler.joblib
+  --receiver-mode tflite \
+  --model artifacts/models/pqm_multilabel_model.tflite
 ```
+
+Legacy `feature` mode and joblib/scaler artifacts remain compatibility/debug paths only.
 
 ## Replay Fallback Command
 
@@ -72,10 +75,10 @@ sudo ./src/system/kiosk_setup.sh \
   --user pi \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature
+  --receiver-mode tflite
 ```
 
-With artifact paths:
+With the canonical production model artifact:
 
 ```bash
 cd /opt/pq-monitor
@@ -84,9 +87,8 @@ sudo ./src/system/kiosk_setup.sh \
   --user pi \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature \
-  --model artifacts/models/pq_model.joblib \
-  --scaler artifacts/scalers/pq_scaler.joblib
+  --receiver-mode tflite \
+  --model artifacts/models/pqm_multilabel_model.tflite
 ```
 
 Service checks:

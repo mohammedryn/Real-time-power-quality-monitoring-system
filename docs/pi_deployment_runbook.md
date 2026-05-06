@@ -27,8 +27,8 @@ pip install -r requirements.txt
 .venv/bin/python scripts/smoke_test.py
 ```
 
-## 3. Optional Model/Scaler Placement
-Place teammate-provided artifacts under artifacts/models and artifacts/scalers, then set them in service environment file.
+## 3. Production Model Placement
+Place the canonical teammate-provided TFLite artifact under `artifacts/models/pqm_multilabel_model.tflite`. Override the service model path only if you intentionally deploy a different `.tflite` artifact.
 
 ## 4. Install Kiosk Service
 Run installer:
@@ -40,7 +40,7 @@ sudo ./src/system/kiosk_setup.sh \
   --user pi \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature
+  --receiver-mode tflite
 ```
 
 ## 5. Verify Service Health

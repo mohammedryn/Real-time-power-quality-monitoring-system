@@ -7,15 +7,18 @@ import numpy as np
 import pytest
 
 from src.io.frame_protocol import (
+    INFERENCE_FRAME_SIZE,
+    INFERENCE_FRAME_TYPE,
     MAGIC_BYTES,
-    MODEL_READY_FRAME_SIZE,
-    MODEL_READY_FRAME_TYPE,
+    InferenceFrame,
     ModelReadyFrame,
     compute_crc,
     iter_frames_from_bytes,
     pack_frame,
     pack_feature_frame,
+    pack_inference_frame,
     pack_model_ready_frame,
+    parse_inference_frame,
     parse_model_ready_frame,
     N_SAMPLES,
     N_FEATURES,
@@ -36,7 +39,7 @@ def _make_arrays(rng: np.random.Generator):
 
 def test_model_ready_frame_size_constant():
     # magic(4) + payload(seq2+type2+wave4000+mag112+phase1080) + crc(4)
-    assert MODEL_READY_FRAME_SIZE == 5204
+    assert INFERENCE_FRAME_SIZE == 5204
 
 
 # ---- Pack / parse roundtrip --------------------------------------------------
@@ -45,10 +48,10 @@ def test_pack_parse_roundtrip():
     rng = np.random.default_rng(0)
     X_wave, X_mag, X_phase = _make_arrays(rng)
 
-    raw = pack_model_ready_frame(42, X_wave, X_mag, X_phase)
-    assert len(raw) == MODEL_READY_FRAME_SIZE
+    raw = pack_inference_frame(42, X_wave, X_mag, X_phase)
+    assert len(raw) == INFERENCE_FRAME_SIZE
 
-    parsed = parse_model_ready_frame(raw)
+    parsed = parse_inference_frame(raw)
     assert parsed.seq == 42
     assert parsed.crc_ok
 
@@ -61,8 +64,8 @@ def test_seq_wraps_modulo_u16():
     rng = np.random.default_rng(1)
     X_wave, X_mag, X_phase = _make_arrays(rng)
 
-    raw = pack_model_ready_frame(0x10001, X_wave, X_mag, X_phase)
-    parsed = parse_model_ready_frame(raw)
+    raw = pack_inference_frame(0x10001, X_wave, X_mag, X_phase)
+    parsed = parse_inference_frame(raw)
     assert parsed.seq == 1   # 0x10001 & 0xFFFF
 
 
@@ -70,7 +73,7 @@ def test_seq_wraps_modulo_u16():
 
 def test_magic_header_is_present():
     rng = np.random.default_rng(2)
-    raw = pack_model_ready_frame(0, *_make_arrays(rng))
+    raw = pack_inference_frame(0, *_make_arrays(rng))
     assert raw[:4] == MAGIC_BYTES
 
 
@@ -78,10 +81,10 @@ def test_magic_header_is_present():
 
 def test_frame_type_tag_is_0x0003():
     rng = np.random.default_rng(3)
-    raw = pack_model_ready_frame(0, *_make_arrays(rng))
+    raw = pack_inference_frame(0, *_make_arrays(rng))
     # Bytes 6-7 (after magic4 + seq2) carry the frame type
     ftype = struct.unpack_from("<H", raw, 6)[0]
-    assert ftype == MODEL_READY_FRAME_TYPE
+    assert ftype == INFERENCE_FRAME_TYPE
     assert ftype == 0x0003
 
 
@@ -89,18 +92,18 @@ def test_frame_type_tag_is_0x0003():
 
 def test_crc_ok_on_intact_frame():
     rng = np.random.default_rng(4)
-    raw = pack_model_ready_frame(7, *_make_arrays(rng))
-    parsed = parse_model_ready_frame(raw)
+    raw = pack_inference_frame(7, *_make_arrays(rng))
+    parsed = parse_inference_frame(raw)
     assert parsed.rx_crc == parsed.calc_crc
     assert parsed.crc_ok
 
 
 def test_crc_fails_on_corrupted_frame():
     rng = np.random.default_rng(5)
-    raw = bytearray(pack_model_ready_frame(8, *_make_arrays(rng)))
+    raw = bytearray(pack_inference_frame(8, *_make_arrays(rng)))
     # Flip a byte in the X_wave section
     raw[10] ^= 0xFF
-    parsed = parse_model_ready_frame(bytes(raw))
+    parsed = parse_inference_frame(bytes(raw))
     assert not parsed.crc_ok
 
 
@@ -109,8 +112,8 @@ def test_crc_fails_on_corrupted_frame():
 def test_output_shapes():
     rng = np.random.default_rng(6)
     X_wave, X_mag, X_phase = _make_arrays(rng)
-    raw = pack_model_ready_frame(0, X_wave, X_mag, X_phase)
-    parsed = parse_model_ready_frame(raw)
+    raw = pack_inference_frame(0, X_wave, X_mag, X_phase)
+    parsed = parse_inference_frame(raw)
 
     assert parsed.X_wave.shape  == (1000,)
     assert parsed.X_mag.shape   == (28,)
@@ -125,8 +128,8 @@ def test_v_norm_i_norm_split():
     X_mag   = rng.standard_normal(28).astype(np.float32)
     X_phase = rng.standard_normal(270).astype(np.float32)
 
-    raw = pack_model_ready_frame(0, X_wave, X_mag, X_phase)
-    parsed = parse_model_ready_frame(raw)
+    raw = pack_inference_frame(0, X_wave, X_mag, X_phase)
+    parsed = parse_inference_frame(raw)
 
     np.testing.assert_array_equal(parsed.v_norm, X_wave[:500])
     np.testing.assert_array_equal(parsed.i_norm, X_wave[500:])
@@ -137,36 +140,36 @@ def test_v_norm_i_norm_split():
 def test_wrong_xwave_length_raises():
     rng = np.random.default_rng(8)
     with pytest.raises(ValueError, match="X_wave"):
-        pack_model_ready_frame(0, np.zeros(500, dtype=np.float32),
-                               np.zeros(28, dtype=np.float32),
-                               np.zeros(270, dtype=np.float32))
+        pack_inference_frame(0, np.zeros(500, dtype=np.float32),
+                             np.zeros(28, dtype=np.float32),
+                             np.zeros(270, dtype=np.float32))
 
 
 def test_wrong_xmag_length_raises():
     rng = np.random.default_rng(9)
     with pytest.raises(ValueError, match="X_mag"):
-        pack_model_ready_frame(0, np.zeros(1000, dtype=np.float32),
-                               np.zeros(10, dtype=np.float32),
-                               np.zeros(270, dtype=np.float32))
+        pack_inference_frame(0, np.zeros(1000, dtype=np.float32),
+                             np.zeros(10, dtype=np.float32),
+                             np.zeros(270, dtype=np.float32))
 
 
 def test_wrong_xphase_length_raises():
     rng = np.random.default_rng(10)
     with pytest.raises(ValueError, match="X_phase"):
-        pack_model_ready_frame(0, np.zeros(1000, dtype=np.float32),
-                               np.zeros(28, dtype=np.float32),
-                               np.zeros(100, dtype=np.float32))
+        pack_inference_frame(0, np.zeros(1000, dtype=np.float32),
+                             np.zeros(28, dtype=np.float32),
+                             np.zeros(100, dtype=np.float32))
 
 
 def test_parse_wrong_length_raises():
     with pytest.raises(ValueError, match="length"):
-        parse_model_ready_frame(b"\x00" * 100)
+        parse_inference_frame(b"\x00" * 100)
 
 
 def test_parse_wrong_magic_raises():
-    bad = b"\x00\x00\x00\x00" + b"\x00" * (MODEL_READY_FRAME_SIZE - 4)
+    bad = b"\x00\x00\x00\x00" + b"\x00" * (INFERENCE_FRAME_SIZE - 4)
     with pytest.raises(ValueError, match="magic"):
-        parse_model_ready_frame(bad)
+        parse_inference_frame(bad)
 
 
 # ---- iter_frames_from_bytes with mixed stream --------------------------------
@@ -175,7 +178,7 @@ def test_iter_finds_model_ready_frames_in_mixed_stream():
     rng = np.random.default_rng(11)
     X_wave, X_mag, X_phase = _make_arrays(rng)
 
-    model_frame = pack_model_ready_frame(10, X_wave, X_mag, X_phase)
+    model_frame = pack_inference_frame(10, X_wave, X_mag, X_phase)
     raw_v = rng.integers(1700, 2400, size=N_SAMPLES, dtype=np.int16)
     raw_i = rng.integers(1800, 2300, size=N_SAMPLES, dtype=np.int16)
     raw_frame = pack_frame(11, raw_v, raw_i)
@@ -186,7 +189,7 @@ def test_iter_finds_model_ready_frames_in_mixed_stream():
     found = list(iter_frames_from_bytes(blob))
     assert len(found) == 3
     assert len(found[0]) == len(raw_frame)
-    assert len(found[1]) == MODEL_READY_FRAME_SIZE
+    assert len(found[1]) == INFERENCE_FRAME_SIZE
     assert len(found[2]) == len(feat_frame)
 
 
@@ -195,12 +198,27 @@ def test_iter_skips_garbage_before_magic():
     X_wave, X_mag, X_phase = _make_arrays(rng)
 
     garbage = b"\xAA\xBB\xCC" * 50
-    model_frame = pack_model_ready_frame(99, X_wave, X_mag, X_phase)
+    model_frame = pack_inference_frame(99, X_wave, X_mag, X_phase)
 
     blob = garbage + model_frame
     found = list(iter_frames_from_bytes(blob))
     assert len(found) == 1
-    assert len(found[0]) == MODEL_READY_FRAME_SIZE
+    assert len(found[0]) == INFERENCE_FRAME_SIZE
+
+
+def test_legacy_model_ready_aliases_remain_compatible():
+    rng = np.random.default_rng(14)
+    X_wave, X_mag, X_phase = _make_arrays(rng)
+
+    assert ModelReadyFrame is InferenceFrame
+
+    new_bytes = pack_inference_frame(21, X_wave, X_mag, X_phase)
+    old_bytes = pack_model_ready_frame(21, X_wave, X_mag, X_phase)
+    assert new_bytes == old_bytes
+
+    parsed = parse_model_ready_frame(new_bytes)
+    assert isinstance(parsed, InferenceFrame)
+    assert parsed.crc_ok
 
 
 # ---- Feature reconstruction roundtrip ---------------------------------------

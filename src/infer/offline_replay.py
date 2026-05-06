@@ -24,7 +24,8 @@ from src.io.frame_protocol import (
     parse_frame,
     parse_model_ready_frame,
 )
-from src.runtime.pipeline import ArtifactPredictor, RuntimePipeline
+from src.runtime.pipeline import RuntimePipeline
+from src.runtime.tflite_predictor import TFLitePredictor
 
 
 def _default_session_log(cfg: dict) -> str:
@@ -34,7 +35,17 @@ def _default_session_log(cfg: dict) -> str:
     return str(root / f"replay_{ts}.jsonl")
 
 
-def _replay_from_npy(path: Path) -> Iterator[dict]:
+def _feature_only_replay_error(source: str) -> ValueError:
+    return ValueError(
+        f"Canonical TFLite inference does not support feature-only replay from {source}; "
+        "use raw waveform or packed tflite/model-ready replay inputs instead"
+    )
+
+
+def _replay_from_npy(path: Path, *, require_waveform_inputs: bool = False) -> Iterator[dict]:
+    if require_waveform_inputs:
+        raise _feature_only_replay_error(str(path))
+
     array = np.load(path)
     if array.ndim == 1:
         array = array.reshape(1, -1)
@@ -48,7 +59,7 @@ def _replay_from_npy(path: Path) -> Iterator[dict]:
         yield {"seq": idx, "features": row.astype(np.float32)}
 
 
-def _replay_from_jsonl(path: Path) -> Iterator[dict]:
+def _replay_from_jsonl(path: Path, *, require_waveform_inputs: bool = False) -> Iterator[dict]:
     with path.open("r", encoding="utf-8") as fp:
         for idx, line in enumerate(fp):
             line = line.strip()
@@ -57,15 +68,25 @@ def _replay_from_jsonl(path: Path) -> Iterator[dict]:
             payload = json.loads(line)
             if "seq" not in payload:
                 payload["seq"] = idx
-            _validate_replay_record(payload, source=f"{path}:{idx + 1}")
+            _validate_replay_record(
+                payload,
+                source=f"{path}:{idx + 1}",
+                require_waveform_inputs=require_waveform_inputs,
+            )
             yield payload
 
 
-def _replay_from_binary(path: Path) -> Iterator[Union[FeatureFrame, ParsedFrame, ModelReadyFrame]]:
+def _replay_from_binary(
+    path: Path,
+    *,
+    require_waveform_inputs: bool = False,
+) -> Iterator[Union[FeatureFrame, ParsedFrame, ModelReadyFrame]]:
     blob = path.read_bytes()
     for frame_bytes in iter_frames_from_bytes(blob):
         _, n = struct.unpack_from("<HH", frame_bytes, 4)
         if n == N_FEATURES:
+            if require_waveform_inputs:
+                raise _feature_only_replay_error(str(path))
             yield parse_feature_frame(frame_bytes)
         elif n == N_SAMPLES:
             yield parse_frame(frame_bytes)
@@ -73,7 +94,12 @@ def _replay_from_binary(path: Path) -> Iterator[Union[FeatureFrame, ParsedFrame,
             yield parse_model_ready_frame(frame_bytes)
 
 
-def _validate_replay_record(payload: dict, source: str) -> None:
+def _validate_replay_record(
+    payload: dict,
+    source: str,
+    *,
+    require_waveform_inputs: bool = False,
+) -> None:
     if not isinstance(payload, dict):
         raise ValueError(f"Replay record must be a JSON object at {source}")
 
@@ -90,10 +116,13 @@ def _validate_replay_record(payload: dict, source: str) -> None:
         )
 
     if has_features:
+        if require_waveform_inputs:
+            raise _feature_only_replay_error(source)
         features = np.asarray(payload["features"], dtype=np.float32).reshape(-1)
-        if features.size != N_FEATURES:
+        valid_lengths = (N_FEATURES, TOTAL_FEATURES)
+        if features.size not in valid_lengths:
             raise ValueError(
-                f"Invalid features length {features.size} at {source}; expected {N_FEATURES}"
+                f"Invalid features length {features.size} at {source}; expected one of {valid_lengths}"
             )
 
     if has_raw:
@@ -116,18 +145,22 @@ def _validate_replay_record(payload: dict, source: str) -> None:
             raise ValueError(f"Invalid X_phase length {x_phase.size} at {source}; expected 270")
 
 
-def load_replay_source(path: str) -> Iterable[Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray]]:
+def load_replay_source(
+    path: str,
+    *,
+    require_waveform_inputs: bool = False,
+) -> Iterable[Union[FeatureFrame, ParsedFrame, ModelReadyFrame, dict, np.ndarray]]:
     replay_path = Path(path)
     if not replay_path.exists():
         raise FileNotFoundError(f"Replay input not found: {replay_path}")
 
     suffix = replay_path.suffix.lower()
     if suffix == ".npy":
-        return _replay_from_npy(replay_path)
+        return _replay_from_npy(replay_path, require_waveform_inputs=require_waveform_inputs)
     if suffix in {".jsonl", ".json"}:
-        return _replay_from_jsonl(replay_path)
+        return _replay_from_jsonl(replay_path, require_waveform_inputs=require_waveform_inputs)
     if suffix in {".bin", ".dat"}:
-        return _replay_from_binary(replay_path)
+        return _replay_from_binary(replay_path, require_waveform_inputs=require_waveform_inputs)
 
     raise ValueError("Unsupported replay input format. Use .npy, .jsonl, or .bin")
 
@@ -136,8 +169,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Offline replay inference")
     parser.add_argument("--input", required=True, help="Replay input (.npy/.jsonl/.bin)")
     parser.add_argument("--config", default="configs/default.yaml", help="Config file path")
-    parser.add_argument("--model", default=None, help="Path to model artifact")
-    parser.add_argument("--scaler", default=None, help="Optional scaler artifact path")
+    parser.add_argument("--model", default=None, help="Path to TFLite model artifact")
+    parser.add_argument("--scaler", default=None, help="Deprecated; ignored in the TFLite runtime")
     parser.add_argument("--session-log", default=None, help="Output JSONL session log path")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N scored frames (0 = all)")
     return parser
@@ -147,14 +180,16 @@ def main() -> int:
     args = _build_parser().parse_args()
     cfg = load_config(args.config)
 
-    predictor = ArtifactPredictor(
+    predictor = TFLitePredictor(
+        model_path=args.model or cfg["ml_inference"]["model_path"],
         class_names=list(cfg["classes"]["names"]),
-        model_path=args.model,
-        scaler_path=args.scaler,
     )
 
     session_log = args.session_log or _default_session_log(cfg)
-    replay_source = load_replay_source(args.input)
+    replay_source = load_replay_source(
+        args.input,
+        require_waveform_inputs=bool(getattr(predictor, "_is_multi_input", False)),
+    )
 
     pipeline = RuntimePipeline(
         cfg,

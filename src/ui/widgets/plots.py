@@ -29,8 +29,16 @@ class WaveformPanel(QtWidgets.QWidget):
         self._plot_i.setLabel("left", "A")
         self._plot_i.setLabel("bottom", "Time", units="ms")
         self._curve_i = self._plot_i.plot(pen=pg.mkPen("#51d6ff", width=2))
+        self._normalized = False
 
-    def update_waveforms(self, v_wave: Sequence[float], i_wave: Sequence[float], fs_hz: float) -> None:
+    def update_waveforms(
+        self,
+        v_wave: Sequence[float],
+        i_wave: Sequence[float],
+        fs_hz: float,
+        *,
+        normalized: bool = False,
+    ) -> None:
         if not v_wave or not i_wave:
             return
 
@@ -39,6 +47,19 @@ class WaveformPanel(QtWidgets.QWidget):
         n = len(v)
         if n == 0:
             return
+
+        if normalized != self._normalized:
+            if normalized:
+                self._plot_v.setTitle("Voltage (normalized)")
+                self._plot_i.setTitle("Current (normalized)")
+                self._plot_v.setLabel("left", "p.u.")
+                self._plot_i.setLabel("left", "p.u.")
+            else:
+                self._plot_v.setTitle("Voltage")
+                self._plot_i.setTitle("Current")
+                self._plot_v.setLabel("left", "V")
+                self._plot_i.setLabel("left", "A")
+            self._normalized = normalized
 
         t_ms = np.arange(n, dtype=np.float32) * (1000.0 / float(fs_hz))
         self._curve_v.setData(t_ms, v)

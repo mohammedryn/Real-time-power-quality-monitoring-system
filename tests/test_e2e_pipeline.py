@@ -264,6 +264,36 @@ def test_offline_replay_loader_supports_npy_298(tmp_path: Path) -> None:
     assert np.asarray(frames[0]["features"], dtype=np.float32).shape == (TOTAL_FEATURES,)
 
 
+def test_offline_replay_loader_supports_jsonl_298(tmp_path: Path) -> None:
+    jsonl_path = tmp_path / "features_298.jsonl"
+    with jsonl_path.open("w", encoding="utf-8") as fp:
+        fp.write(json.dumps({"seq": 1, "features": [0.0] * TOTAL_FEATURES}) + "\n")
+
+    frames = list(load_replay_source(str(jsonl_path)))
+    assert len(frames) == 1
+    assert np.asarray(frames[0]["features"], dtype=np.float32).shape == (TOTAL_FEATURES,)
+
+
+def test_offline_replay_loader_rejects_feature_only_inputs_for_canonical_tflite(tmp_path: Path) -> None:
+    rng = np.random.default_rng(101)
+
+    npy_path = tmp_path / "features.npy"
+    np.save(npy_path, rng.standard_normal((2, TOTAL_FEATURES)).astype(np.float32))
+    with pytest.raises(ValueError, match="feature-only replay"):
+        list(load_replay_source(str(npy_path), require_waveform_inputs=True))
+
+    jsonl_path = tmp_path / "features.jsonl"
+    with jsonl_path.open("w", encoding="utf-8") as fp:
+        fp.write(json.dumps({"seq": 1, "features": rng.standard_normal(TOTAL_FEATURES).tolist()}) + "\n")
+    with pytest.raises(ValueError, match="feature-only replay"):
+        list(load_replay_source(str(jsonl_path), require_waveform_inputs=True))
+
+    bin_path = tmp_path / "features.bin"
+    bin_path.write_bytes(pack_feature_frame(5, rng.standard_normal(N_FEATURES).astype(np.float32)))
+    with pytest.raises(ValueError, match="feature-only replay"):
+        list(load_replay_source(str(bin_path), require_waveform_inputs=True))
+
+
 def test_offline_replay_loader_jsonl_rejects_bad_feature_length(tmp_path: Path) -> None:
     jsonl_path = tmp_path / "bad_features.jsonl"
     with jsonl_path.open("w", encoding="utf-8") as fp:
@@ -300,6 +330,27 @@ def test_offline_replay_loader_jsonl_rejects_ambiguous_payload(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="exactly one payload type"):
         list(load_replay_source(str(jsonl_path)))
+
+
+def test_runtime_pipeline_surfaces_multi_input_contract_errors(tmp_path: Path) -> None:
+    cfg = load_config("configs/default.yaml")
+    n_classes = len(cfg["classes"]["names"])
+    rng = np.random.default_rng(202)
+
+    replay_source = [{"seq": 1, "features": rng.standard_normal(TOTAL_FEATURES).astype(np.float32)}]
+    pipeline = RuntimePipeline(
+        cfg,
+        DummyMultiInputPredictor(n_classes),
+        replay_source=replay_source,
+        session_log_path=str(tmp_path / "session.jsonl"),
+    )
+
+    pipeline.start()
+    try:
+        with pytest.raises(RuntimeError, match="requires normalized waveform inputs"):
+            pipeline.get_result(timeout=2.0)
+    finally:
+        pipeline.stop()
 
 
 def test_raw_frame_routes_to_multi_input_predictor_path(tmp_path: Path) -> None:

@@ -6,7 +6,8 @@ from pathlib import Path
 import sys
 
 from src.dsp.preprocess import load_config
-from src.runtime.pipeline import ArtifactPredictor, RuntimePipeline
+from src.runtime.pipeline import RuntimePipeline
+from src.runtime.tflite_predictor import TFLitePredictor
 
 
 def _default_session_log(cfg: dict) -> str:
@@ -22,12 +23,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="configs/default.yaml", help="Config file path")
     parser.add_argument(
         "--receiver-mode",
-        choices=["model4", "feature", "raw"],
-        default="model4",
-        help="model4: 298-feature+waveform frames (default), feature: legacy 282-feature, raw: host DSP fallback",
+        choices=["tflite", "raw"],
+        default="tflite",
+        help="tflite: packed live inference frame (default), raw: host DSP fallback",
     )
-    parser.add_argument("--model", default=None, help="Path to model artifact (.joblib/.pkl/.keras/.h5)")
-    parser.add_argument("--scaler", default=None, help="Optional scaler artifact path")
+    parser.add_argument("--model", default=None, help="Path to TFLite model artifact")
+    parser.add_argument("--scaler", default=None, help="Deprecated; ignored in the TFLite runtime")
     parser.add_argument("--session-log", default=None, help="Output JSONL session log path")
     parser.add_argument("--max-frames", type=int, default=0, help="Stop after N scored frames (0 = infinite)")
     return parser
@@ -37,10 +38,9 @@ def main() -> int:
     args = _build_parser().parse_args()
     cfg = load_config(args.config)
 
-    predictor = ArtifactPredictor(
+    predictor = TFLitePredictor(
+        model_path=args.model or cfg["ml_inference"]["model_path"],
         class_names=list(cfg["classes"]["names"]),
-        model_path=args.model,
-        scaler_path=args.scaler,
     )
 
     session_log = args.session_log or _default_session_log(cfg)

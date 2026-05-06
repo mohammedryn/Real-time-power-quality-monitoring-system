@@ -43,8 +43,9 @@ features:
   dwt_level: 5
 
 ml_inference:
-  model_path: artifacts/models/pqm_multilabel_model.keras
-  receiver_mode: model4
+  model_path: artifacts/models/pqm_multilabel_model.tflite
+  receiver_mode: tflite
+  output_semantics: multi_label
   multi_label: true
   thresholds:
     Normal: 0.50

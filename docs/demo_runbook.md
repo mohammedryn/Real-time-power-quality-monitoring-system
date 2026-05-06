@@ -31,7 +31,7 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 .venv/bin/python -m src.ui.app \
   --port /dev/ttyACM0 \
   --config configs/default.yaml \
-  --receiver-mode feature
+  --receiver-mode tflite
 ```
 
 2. Explain panels:
@@ -57,7 +57,7 @@ If live hardware is unavailable:
 
 ## Troubleshooting During Demo
 - No serial frames: verify /dev/ttyACM0 and receiver mode.
-- UI open but no predictions: verify model/scaler paths or run without model for uniform fallback.
+- UI open but no predictions: verify the TFLite model path or run without overriding the default artifact path.
 - High latency: inspect health panel and runtime queues.
 
 ## Required Demo Artifacts

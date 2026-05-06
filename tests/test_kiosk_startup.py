@@ -10,10 +10,10 @@ SERVICE_TEMPLATE = REPO_ROOT / "src" / "system" / "service" / "pq-monitor.servic
 KIOSK_SETUP = REPO_ROOT / "src" / "system" / "kiosk_setup.sh"
 
 
-def _build_exec_start(model_path: str = "", scaler_path: str = "") -> str:
+def _build_exec_start(model_path: str = "") -> str:
     cmd = (
         f"source {shlex.quote(str(KIOSK_SETUP))}; "
-        f"build_exec_start /opt/pq-monitor {shlex.quote(model_path)} {shlex.quote(scaler_path)}"
+        f"build_exec_start /opt/pq-monitor {shlex.quote(model_path)}"
     )
     result = subprocess.run(
         ["bash", "-c", cmd],
@@ -37,6 +37,12 @@ def test_service_template_omits_optional_artifact_flags() -> None:
     assert " --scaler " not in exec_start
 
 
+def test_kiosk_script_defaults_to_tflite_mode() -> None:
+    text = KIOSK_SETUP.read_text(encoding="utf-8")
+    assert "--receiver-mode MODE   tflite or raw (default: tflite)" in text
+    assert 'local RECEIVER_MODE="tflite"' in text
+
+
 def test_kiosk_exec_start_omits_empty_artifact_flags() -> None:
     exec_start = _build_exec_start()
 
@@ -50,9 +56,8 @@ def test_kiosk_exec_start_omits_empty_artifact_flags() -> None:
 
 def test_kiosk_exec_start_includes_non_empty_artifact_flags() -> None:
     exec_start = _build_exec_start(
-        model_path="artifacts/models/pq_model.joblib",
-        scaler_path="artifacts/scalers/pq_scaler.joblib",
+        model_path="artifacts/models/pqm_multilabel_model.tflite",
     )
 
     assert " --model ${PQ_MODEL_PATH}" in exec_start
-    assert " --scaler ${PQ_SCALER_PATH}" in exec_start
+    assert " --scaler " not in exec_start

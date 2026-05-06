@@ -88,8 +88,55 @@ def test_receiver_reconnect_after_serial_exception(monkeypatch):
     assert rx.stats.reconnects >= 1
 
 
-def test_main_dispatches_model4_mode_to_model4_recorder(monkeypatch, tmp_path):
-    calls = {"model4": 0, "raw": 0, "feature": 0, "snapshots": 0}
+def test_receiver_accepts_tflite_mode_and_model4_alias():
+    direct = SerialFrameReceiver(port="/dev/null", mode="tflite")
+    legacy = SerialFrameReceiver(port="/dev/null", mode="model4")
+
+    assert direct.mode == "tflite"
+    assert legacy.mode == "tflite"
+    assert direct._frame_size == legacy._frame_size
+
+
+def test_main_dispatches_tflite_mode_to_tflite_recorder(monkeypatch, tmp_path):
+    calls = {"tflite": 0, "raw": 0, "feature": 0, "snapshots": 0}
+
+    args = SimpleNamespace(
+        port="/dev/null",
+        output=str(tmp_path / "out.bin"),
+        frames=3,
+        baud=115200,
+        timeout=0.1,
+        mode="tflite",
+        config="configs/default.yaml",
+    )
+
+    class _Parser:
+        def parse_args(self):
+            return args
+
+    monkeypatch.setattr(serial_receiver_mod, "_build_parser", lambda: _Parser())
+
+    def _mk(kind):
+        def _inner(**_kwargs):
+            calls[kind] += 1
+            return tmp_path / "dummy.out"
+        return _inner
+
+    monkeypatch.setattr(serial_receiver_mod, "record_tflite_stream", _mk("tflite"))
+    monkeypatch.setattr(serial_receiver_mod, "record_raw_stream", _mk("raw"))
+    monkeypatch.setattr(serial_receiver_mod, "record_feature_stream", _mk("feature"))
+    monkeypatch.setattr(serial_receiver_mod, "record_frame_snapshots", _mk("snapshots"))
+
+    rc = serial_receiver_mod.main()
+    assert rc == 0
+    assert calls["tflite"] == 1
+    assert calls["raw"] == 0
+    assert calls["feature"] == 0
+    assert calls["snapshots"] == 0
+
+
+def test_main_dispatches_model4_alias_to_tflite_recorder(monkeypatch, tmp_path):
+    calls = {"tflite": 0, "raw": 0, "feature": 0, "snapshots": 0}
 
     args = SimpleNamespace(
         port="/dev/null",
@@ -113,14 +160,14 @@ def test_main_dispatches_model4_mode_to_model4_recorder(monkeypatch, tmp_path):
             return tmp_path / "dummy.out"
         return _inner
 
-    monkeypatch.setattr(serial_receiver_mod, "record_model4_stream", _mk("model4"))
+    monkeypatch.setattr(serial_receiver_mod, "record_tflite_stream", _mk("tflite"))
     monkeypatch.setattr(serial_receiver_mod, "record_raw_stream", _mk("raw"))
     monkeypatch.setattr(serial_receiver_mod, "record_feature_stream", _mk("feature"))
     monkeypatch.setattr(serial_receiver_mod, "record_frame_snapshots", _mk("snapshots"))
 
     rc = serial_receiver_mod.main()
     assert rc == 0
-    assert calls["model4"] == 1
+    assert calls["tflite"] == 1
     assert calls["raw"] == 0
     assert calls["feature"] == 0
     assert calls["snapshots"] == 0

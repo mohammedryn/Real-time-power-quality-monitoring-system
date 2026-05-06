@@ -9,9 +9,9 @@ from pathlib import Path
 import serial
 
 from src.io.frame_protocol import (
-    FRAME_SIZE, FEATURE_FRAME_SIZE, MODEL_READY_FRAME_SIZE, MAGIC_BYTES,
-    ParsedFrame, FeatureFrame, ModelReadyFrame,
-    parse_frame, parse_feature_frame, parse_model_ready_frame,
+    FRAME_SIZE, FEATURE_FRAME_SIZE, INFERENCE_FRAME_SIZE, MAGIC_BYTES,
+    ParsedFrame, FeatureFrame, InferenceFrame,
+    parse_frame, parse_feature_frame, parse_inference_frame,
 )
 from src.dsp.preprocess import load_config, preprocess_frame
 
@@ -25,6 +25,12 @@ class ReceiverStats:
     reconnects: int = 0
 
 
+_LIVE_MODE_ALIASES = {
+    "tflite": "tflite",
+    "model4": "tflite",
+}
+
+
 class SerialFrameReceiver:
     def __init__(
         self,
@@ -35,17 +41,24 @@ class SerialFrameReceiver:
         max_reconnect_attempts: int = 3,
         mode: str = "raw",
     ) -> None:
-        if mode not in ("raw", "feature", "model4"):
-            raise ValueError(f"mode must be 'raw', 'feature', or 'model4', got {mode!r}")
+        if mode in _LIVE_MODE_ALIASES:
+            canonical_mode = _LIVE_MODE_ALIASES[mode]
+        elif mode in ("raw", "feature"):
+            canonical_mode = mode
+        else:
+            raise ValueError(
+                "mode must be 'raw', 'feature', 'tflite', or legacy alias 'model4', "
+                f"got {mode!r}"
+            )
         self.port = port
         self.baud = baud
         self.timeout = timeout
         self.reconnect_delay = reconnect_delay
         self.max_reconnect_attempts = max_reconnect_attempts
-        self.mode = mode
-        if mode == "model4":
-            self._frame_size = MODEL_READY_FRAME_SIZE
-        elif mode == "feature":
+        self.mode = canonical_mode
+        if self.mode == "tflite":
+            self._frame_size = INFERENCE_FRAME_SIZE
+        elif self.mode == "feature":
             self._frame_size = FEATURE_FRAME_SIZE
         else:
             self._frame_size = FRAME_SIZE
@@ -114,7 +127,7 @@ class SerialFrameReceiver:
         self,
         frame_timeout: float = 1.0,
         max_crc_failures: int = 8,
-    ) -> ParsedFrame | FeatureFrame | ModelReadyFrame | None:
+    ) -> ParsedFrame | FeatureFrame | InferenceFrame | None:
         if self.ser is None:
             self.open()
 
@@ -133,8 +146,8 @@ class SerialFrameReceiver:
 
             frame_bytes = MAGIC_BYTES + remaining
             try:
-                if self.mode == "model4":
-                    parsed: ParsedFrame | FeatureFrame | ModelReadyFrame = parse_model_ready_frame(frame_bytes)
+                if self.mode == "tflite":
+                    parsed: ParsedFrame | FeatureFrame | InferenceFrame = parse_inference_frame(frame_bytes)
                 elif self.mode == "feature":
                     parsed = parse_feature_frame(frame_bytes)
                 else:
@@ -227,7 +240,7 @@ def record_feature_stream(
     return output
 
 
-def record_model4_stream(
+def record_tflite_stream(
     port: str,
     output_path: str | Path,
     target_frames: int = 120,
@@ -237,7 +250,7 @@ def record_model4_stream(
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout, mode="model4")
+    receiver = SerialFrameReceiver(port=port, baud=baud, timeout=timeout, mode="tflite")
     receiver.open()
 
     written = 0
@@ -247,15 +260,32 @@ def record_model4_stream(
                 frame = receiver.read_frame(frame_timeout=timeout)
                 if frame is None:
                     continue
-                # Re-pack model-ready frames as deterministic binary stream for replay/validation.
-                from src.io.frame_protocol import pack_model_ready_frame
+                # Re-pack inference frames as deterministic binary stream for replay/validation.
+                from src.io.frame_protocol import pack_inference_frame
 
-                fp.write(pack_model_ready_frame(frame.seq, frame.X_wave, frame.X_mag, frame.X_phase))
+                fp.write(pack_inference_frame(frame.seq, frame.X_wave, frame.X_mag, frame.X_phase))
                 written += 1
         finally:
             receiver.close()
 
     return output
+
+
+def record_model4_stream(
+    port: str,
+    output_path: str | Path,
+    target_frames: int = 120,
+    baud: int = 115200,
+    timeout: float = 1.0,
+) -> Path:
+    """Backward-compatible alias for the legacy model4 live stream name."""
+    return record_tflite_stream(
+        port=port,
+        output_path=output_path,
+        target_frames=target_frames,
+        baud=baud,
+        timeout=timeout,
+    )
 
 
 def record_frame_snapshots(
@@ -312,10 +342,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=1.0)
     parser.add_argument(
         "--mode",
-        choices=["raw", "snapshots", "feature", "model4"],
-        default="model4",
+        choices=["raw", "snapshots", "feature", "tflite", "model4"],
+        default="tflite",
         help=(
-            "model4: model-ready frame stream (default), "
+            "tflite: inference frame stream (default), "
+            "model4: legacy alias for tflite, "
             "raw: binary raw-frame stream, "
             "feature: binary feature-frame stream, "
             "snapshots: jsonl with raw+processed arrays"
@@ -345,8 +376,8 @@ def main() -> int:
             baud=args.baud,
             timeout=args.timeout,
         )
-    elif args.mode == "model4":
-        out = record_model4_stream(
+    elif args.mode in _LIVE_MODE_ALIASES:
+        out = record_tflite_stream(
             port=args.port,
             output_path=args.output,
             target_frames=args.frames,

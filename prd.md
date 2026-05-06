@@ -15,8 +15,8 @@ The product must prove that phase-aware features improve classification performa
 
 ## 4. Goals
 1. Deliver working hardware-to-AI pipeline from Teensy frame capture to classified output.
-2. Implement the report-aligned DSP stack with N=500, fs=5000, and 282-feature vector.
-3. Train and evaluate model variants M1-M4 with reproducible experiments.
+2. Implement the report-aligned DSP stack with N=500, fs=5000, and 298-feature vector.
+3. Train and evaluate model variants M1-M4 with reproducible experiments, then export the production TFLite artifact.
 4. Close synthetic-to-real gap with domain adaptation workflow.
 5. Produce demo-ready outputs and reproducible scripts for evaluation.
 6. Deploy as a handheld Raspberry Pi 5 (8GB) device with real-time touch UI on Pi display.
@@ -36,8 +36,8 @@ The product must prove that phase-aware features improve classification performa
 1. Teensy firmware for synchronized dual ADC capture and CRC-framed USB streaming.
 2. Python receiver and preprocessing for binary frame protocol.
 3. Report-aligned synthetic dataset generation (38,500 samples, 7 classes).
-4. Feature extraction pipeline: time-domain + FFT harmonic + phase-aware + DWT = 282 features.
-5. Model training for M1-M4 and evaluation scripts.
+4. Feature extraction pipeline: time-domain + power metrics + FFT harmonic + phase-aware + DWT = 298 features.
+5. Model training for M1-M4 research variants, evaluation scripts, and canonical TFLite export.
 6. Domain adaptation on real data (100-200 samples per class target).
 7. Reproducible artifacts: models, scalers, metrics, plots, confusion matrices.
 8. Integration demo script for live inference.
@@ -72,13 +72,13 @@ The product must prove that phase-aware features improve classification performa
 2. Remove DC offsets per frame.
 3. Provide normalized waveform pair for model branches requiring normalized signals.
 
-### FR-5 Feature Extraction (282 features)
+### FR-5 Feature Extraction (298 features)
 1. Time-domain stats: 24 total across V and I.
-2. FFT magnitudes h=1..13 for V and I: 26.
-3. THD values for V and I: 2.
-4. Phase-aware features exactly per report, including circular statistics.
-5. DWT feature extraction for V and I: 72.
-6. Final vector shape must be exactly 282.
+2. Overall power metrics: apparent power, active power, reactive power, power factor.
+3. FFT magnitudes h=1..13 for V and I plus THD values: 28 total.
+4. Phase-aware features exactly per report, including circular statistics and per-harmonic power terms.
+5. DWT feature extraction for V and I: 84 total, including transient-booster statistics.
+6. Final vector shape must be exactly 298.
 
 ### FR-6 Dataset Generation
 1. Generate 7 classes: Normal, Sag, Swell, Interruption, Harmonic Distortion, Transient, Flicker.
@@ -87,9 +87,10 @@ The product must prove that phase-aware features improve classification performa
 4. Train/val/test split must be reproducible and documented.
 
 ### FR-7 Models and Ablation
-1. Implement M1, M2, M3, M4 variants as described in report.
+1. Implement M1, M2, M3, M4 research variants as described in report.
 2. Run controlled ablation with identical splits and logging.
 3. Save best checkpoints and metrics per model.
+4. Export the deployable production artifact to `artifacts/models/pqm_multilabel_model.tflite`.
 
 ### FR-8 Domain Adaptation
 1. Support fine-tuning with real captured labeled windows.
@@ -98,8 +99,10 @@ The product must prove that phase-aware features improve classification performa
 
 ### FR-9 Inference and Demo
 1. Real-time or near-real-time inference script consuming live or recorded frames.
-2. Output predicted class + confidence.
-3. Persist logs with timestamp and selected derived values.
+2. Public live mode must be `tflite`; older `feature` and `raw` paths are compatibility/debug modes.
+3. Production inference must load `artifacts/models/pqm_multilabel_model.tflite`.
+4. Output predicted class + confidence.
+5. Persist logs with timestamp and selected derived values.
 
 ### FR-10 Handheld Device Runtime (Raspberry Pi 5)
 1. Target runtime device: Raspberry Pi 5 (8GB) with official Pi display.
@@ -138,8 +141,9 @@ The product must prove that phase-aware features improve classification performa
 ## 10. Data and File Requirements
 1. Keep raw captured frames and processed datasets separate.
 2. Save scalers and model weights with explicit version names.
-3. Save confusion matrices and training curves for each model variant.
-4. Add a run manifest (json) for each experiment.
+3. Reserve `artifacts/models/pqm_multilabel_model.tflite` as the canonical production export path.
+4. Save confusion matrices and training curves for each model variant.
+5. Add a run manifest (json) for each experiment.
 
 ## 11. Proposed Repository Structure
 1. firmware/teensy/pq_firmware/pq_firmware.ino
@@ -178,8 +182,8 @@ The product must prove that phase-aware features improve classification performa
 
 ## 13. Success Metrics
 1. All FR requirements implemented and tested.
-2. Feature vector shape validated at 282 in unit/integration tests.
-3. M4 outperforms M3 on synthetic test split by measurable margin.
+2. Feature vector shape validated at 298 in unit/integration tests.
+3. The phase-aware hybrid research variant (historically M4) outperforms M3 on synthetic test split by measurable margin.
 4. Domain adaptation improves real-data performance over zero-shot baseline.
 5. End-to-end live pipeline runs without protocol errors for at least 100 consecutive frames.
 6. Handheld app runs for 30 minutes continuously without crash or UI freeze.
@@ -201,7 +205,7 @@ Mitigation: decoupled render loop, bounded queues, backpressure strategy.
 
 ## 15. Definition of Done
 1. End-to-end demo works from Teensy capture to class output.
-2. Reproducible training for M1-M4 completed and documented.
+2. Reproducible training for M1-M4 completed and documented, with the production TFLite export generated.
 3. All required artifacts generated and stored with manifests.
 4. Domain adaptation script and results included.
 5. README-level run instructions updated and verified by clean run.
@@ -212,4 +216,4 @@ Mitigation: decoupled render loop, bounded queues, backpressure strategy.
 1. Follow tasks.md chunk order; do not skip integration tests.
 2. Every chunk must end with acceptance checks and artifact generation.
 3. Keep report alignment explicit in commit messages and logs.
-4. Do not silently change class labels, sample rates, frame format, or feature counts.
+4. Do not silently change class labels, sample rates, frame format, feature counts, model artifact path, or the public `tflite` runtime term.

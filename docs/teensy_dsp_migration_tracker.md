@@ -6,7 +6,9 @@ This document tracks the migration of feature extraction DSP from Pi host-side e
 ## Snapshot
 - Date: 2026-04-27
 - Migration status: In progress, software path complete, pending hardware evidence capture
-- Primary goal: Teensy computes full 282-feature vector, Pi consumes feature vector directly for scaler + model inference
+- Primary goal: Teensy computes the canonical 298-feature vector, and Pi consumes the packed inference payload for `tflite` runtime inference
+- Active public runtime term: `tflite`
+- Legacy compatibility term: `model4` should be treated as an older alias, not the preferred live-mode name
 
 ## Architecture Delta
 ### Before
@@ -14,9 +16,9 @@ This document tracks the migration of feature extraction DSP from Pi host-side e
 - Pi performed preprocess + feature extraction
 
 ### After
-- Teensy sends feature frame (1140 bytes): [MAGIC][seq][n=282][features float32][CRC32]
-- Pi receives features and can directly feed scaler + model
-- Raw mode still available for fallback, parity, and capture workflows
+- Teensy sends packed inference frame (5204 bytes): [MAGIC][seq][type=0x0003][X_wave][X_mag][X_phase][CRC32]
+- Pi receives the packed payload and feeds the production TFLite predictor
+- Legacy 282-feature frame support remains compatibility-only for fallback, parity, and capture workflows
 
 ### Why this change
 - Lower host CPU load for real-time UI + inference
@@ -43,33 +45,33 @@ Why this way:
 - Goertzel avoids full FFT overhead for fixed harmonic bins.
 - Firmware-side DWT and stats keep host runtime lightweight.
 
-### 2) Protocol: mixed raw + feature frame support
+### 2) Protocol: mixed raw + compatibility feature frame + packed inference frame support
 - Extended protocol constants, feature dataclass, and parser support:
   - [../src/io/frame_protocol.py](../src/io/frame_protocol.py)
-- Added variable-length iterator with header peek (`n` dispatch) and resync behavior for unknown frame types.
+- Added variable-length iterator with header peek (`n`/type dispatch) and resync behavior for unknown frame types.
 
 Why this way:
 - Supports mixed streams during migration and debugging.
-- Preserves backward compatibility with existing raw frame tooling.
+- Preserves backward compatibility with existing raw frame tooling and legacy 282-feature captures.
 - Improves robustness in noisy streams by explicit resynchronization behavior.
 
-### 3) Receiver: feature mode support in runtime and CLI
-- Added receiver mode selection (`raw` or `feature`) and frame-size aware parsing:
+### 3) Receiver: runtime mode support in runtime and CLI
+- Added receiver mode selection for raw capture, legacy feature compatibility, and packed inference transport:
   - [../src/io/serial_receiver.py](../src/io/serial_receiver.py)
 - Added feature stream recording path (`--mode feature`) in CLI.
 
 Why this way:
-- Enables direct feature pipeline capture for inference and diagnostics.
+- Enables direct packed-inference capture for the production `tflite` path while retaining legacy feature capture for diagnostics.
 - Keeps existing raw and snapshot workflows available.
 
-### 4) Live feature path switched to direct FeatureFrame consumption
-- Updated live feature demo script to default to feature receiver mode:
+### 4) Live packed-inference path is the canonical production path
+- Updated live inference documentation to treat the packed inference / `tflite` receiver mode as the canonical path:
   - [../scripts/live_features_demo.py](../scripts/live_features_demo.py)
-- Added explicit `--receiver-mode` switch (`feature` default, `raw` fallback).
+- Added explicit `--receiver-mode` handling for the packed inference path, with legacy `feature` and `raw` fallback modes retained for compatibility.
 
 Why this way:
-- Uses the intended low-latency production path by default.
-- Retains host-DSP fallback for troubleshooting.
+- Uses the intended low-latency production path and canonical TFLite artifact for deployment.
+- Retains host-DSP and legacy-feature fallback for troubleshooting.
 
 ### 5) DWT boundary alignment
 - Set explicit PyWavelets mode to periodization in:
@@ -170,7 +172,7 @@ Note:
 - [x] Feature frame protocol implemented
 - [x] Receiver runtime feature mode implemented
 - [x] Receiver CLI feature mode implemented
-- [x] Live feature script default switched to feature path
+- [x] Packed inference / `tflite` path documented as the canonical live contract
 - [x] DWT boundary mode aligned to periodization
 - [x] Canonical feature index map added
 - [x] Calibration constants aligned across firmware/config
@@ -183,8 +185,8 @@ Note:
 ## Standard HIL Procedure
 1. Flash firmware with `PQ_RAW_MODE=1`.
 2. Run [../scripts/hil_compare_raw_feature.py](../scripts/hil_compare_raw_feature.py) and capture raw-mode feature recomputation.
-3. Flash firmware with default feature mode (`PQ_RAW_MODE=0`).
-4. Continue script capture for direct feature frames.
+3. Flash firmware with the default packed inference path (`PQ_RAW_MODE=0`).
+4. Continue script capture for the canonical packed inference / `tflite` path and, when needed, collect legacy feature-frame compatibility evidence separately.
 5. Review output artifacts under `artifacts/hil_parity` and track regressions over time.
 
 ## How to maintain this tracker

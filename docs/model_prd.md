@@ -6,6 +6,12 @@
 **Date:** April 2026
 **Status:** Active — Start Here
 
+Active deployment contract:
+- Production artifact: `artifacts/models/pqm_multilabel_model.tflite`
+- Canonical feature length: `298`
+- Public live/runtime term: `tflite`
+- Historical research term: `M4` remains valid for ablation discussions only
+
 ---
 
 ## 0. Quick Start — What You Need to Know in 60 Seconds
@@ -13,15 +19,16 @@
 You are responsible for **Chunks 4, 5, 6, and 7** from `tasks.md`. The rest of the pipeline is already built and working. Your job is to:
 
 1. Write the synthetic dataset generator (`src/data/synthetic_generator.py`)
-2. Implement four model variants M1–M4 (`src/models/`)
+2. Implement four model variants M1–M4 (`src/models/`) for research and ablation
 3. Write the training + evaluation pipeline (`src/train/train.py`, `src/eval/evaluate.py`)
 4. Run the ablation study and produce artifacts (`src/eval/ablation.py`)
+5. Export the deployable production model to `artifacts/models/pqm_multilabel_model.tflite`
 
 **You do not touch:** firmware, serial receiver, preprocessing, or feature extraction. Those are done and tested.
 
 **Do not repeat the legacy models.** The files in `legacy/Single_signal_LM/` are from an earlier iteration. They use the wrong sampling rate (6000 Hz vs 5000 Hz), wrong window duration assumptions, wrong class set (Notch vs Flicker), and arbitrary signal amplitudes. They cannot be adapted into the current spec. Use the signal injection logic as reference only — see Section 9.
 
-**The canonical config is `configs/default.yaml`.** Never hardcode `fs`, `N`, class names, or paths. Always load from config.
+**The canonical config is `configs/default.yaml`.** Never hardcode `fs`, `N`, class names, or paths. Always load from config. For deployment docs and runtime naming, prefer the active `tflite` contract over older `model4` wording.
 
 ---
 
@@ -39,60 +46,61 @@ src/dsp/preprocess.py           → preprocess_frame(v_raw, i_raw, cfg)
     ↓  dict: v_phys, i_phys, v_norm, i_norm  (all np.float64[500])
 src/dsp/features.py             → extract_features(v_phys, i_phys)
 src/dsp/wavelet_features.py     → extract_dwt_features(signal)
-    ↓  np.float32[282]  ← THIS IS YOUR MODEL'S INPUT
+    ↓  np.float32[298]  ← THIS IS YOUR MODEL'S INPUT
 ```
 
 ### 1.2 What `extract_features()` Gives You
 
-The function `src/dsp/features.py::extract_features(v_phys, i_phys)` takes the physical-unit waveforms (Volts and Amps, DC-removed, 500 samples each) and returns a **single `np.float32` array of length exactly 282**. This is the feature vector every model in this project operates on (in whole or in part).
+The function `src/dsp/features.py::extract_features(v_phys, i_phys)` takes the physical-unit waveforms (Volts and Amps, DC-removed, 500 samples each) and returns a **single `np.float32` array of length exactly 298**. This is the canonical feature vector every model in this project operates on (in whole or in part).
 
-**The exact layout of the 282-element vector — memorize this:**
+**The exact layout of the 298-element vector — memorize this:**
 
 | Slice | Indices | Count | Description |
 |---|---|---|---|
 | `X[:, 0:12]` | 0–11 | 12 | Time-domain stats: voltage (mean, std, rms, peak, crest\_factor, form\_factor, skew, kurtosis, ptp, zero\_crossings, min, max) |
 | `X[:, 12:24]` | 12–23 | 12 | Same 12 stats for current channel |
-| `X[:, 24:37]` | 24–36 | 13 | FFT harmonic magnitudes h=1..13, voltage channel |
-| `X[:, 37:50]` | 37–49 | 13 | FFT harmonic magnitudes h=1..13, current channel |
-| `X[:, 50:52]` | 50–51 | 2 | THD\_V, THD\_I |
-| `X[:, 52:78]` | 52–77 | 26 | Absolute phase sin/cos encoding voltage: `[sin(φ_v1)...sin(φ_v13), cos(φ_v1)...cos(φ_v13)]` |
-| `X[:, 78:104]` | 78–103 | 26 | Absolute phase sin/cos encoding current: same pattern |
-| `X[:, 104:117]` | 104–116 | 13 | V-I cross-channel phase sin: `[sin(φ_v_h - φ_i_h)]` for h=1..13 |
-| `X[:, 117:130]` | 117–129 | 13 | V-I cross-channel phase cos: `[cos(φ_v_h - φ_i_h)]` for h=1..13 |
-| `X[:, 130:142]` | 130–141 | 12 | Relative phase sin (V): `[sin(φ_v_h - φ_v_1)]` for h=2..13 |
-| `X[:, 142:154]` | 142–153 | 12 | Relative phase cos (V): `[cos(φ_v_h - φ_v_1)]` for h=2..13 |
-| `X[:, 154:166]` | 154–165 | 12 | Relative phase sin (I): `[sin(φ_i_h - φ_i_1)]` for h=2..13 |
-| `X[:, 166:178]` | 166–177 | 12 | Relative phase cos (I): `[cos(φ_i_h - φ_i_1)]` for h=2..13 |
-| `X[:, 178:204]` | 178–203 | 26 | Per-harmonic active+reactive power: `[P_h, Q_h]` for h=1..13 |
-| `X[:, 204:210]` | 204–209 | 6 | Circular stats: circmean\_V, circstd\_V, circmean\_I, circstd\_I, circmean\_cross, circstd\_cross |
-| `X[:, 210:246]` | 210–245 | 36 | DWT subband features, voltage: 6 subbands × 6 stats (mean,std,skew,kurt,energy,entropy) |
-| `X[:, 246:282]` | 246–281 | 36 | DWT subband features, current: same 6×6 pattern |
+| `X[:, 24:28]` | 24–27 | 4 | Overall power metrics: apparent power, active power, reactive power, power factor |
+| `X[:, 28:41]` | 28–40 | 13 | FFT harmonic magnitudes h=1..13, voltage channel |
+| `X[:, 41:54]` | 41–53 | 13 | FFT harmonic magnitudes h=1..13, current channel |
+| `X[:, 54:56]` | 54–55 | 2 | THD\_V, THD\_I |
+| `X[:, 56:82]` | 56–81 | 26 | Absolute phase sin/cos encoding voltage: `[sin(φ_v1)...sin(φ_v13), cos(φ_v1)...cos(φ_v13)]` |
+| `X[:, 82:108]` | 82–107 | 26 | Absolute phase sin/cos encoding current: same pattern |
+| `X[:, 108:121]` | 108–120 | 13 | V-I cross-channel phase sin: `[sin(φ_v_h - φ_i_h)]` for h=1..13 |
+| `X[:, 121:134]` | 121–133 | 13 | V-I cross-channel phase cos: `[cos(φ_v_h - φ_i_h)]` for h=1..13 |
+| `X[:, 134:146]` | 134–145 | 12 | Relative phase sin (V): `[sin(φ_v_h - φ_v_1)]` for h=2..13 |
+| `X[:, 146:158]` | 146–157 | 12 | Relative phase cos (V): `[cos(φ_v_h - φ_v_1)]` for h=2..13 |
+| `X[:, 158:170]` | 158–169 | 12 | Relative phase sin (I): `[sin(φ_i_h - φ_i_1)]` for h=2..13 |
+| `X[:, 170:182]` | 170–181 | 12 | Relative phase cos (I): `[cos(φ_i_h - φ_i_1)]` for h=2..13 |
+| `X[:, 182:208]` | 182–207 | 26 | Per-harmonic active+reactive power: `[P_h, Q_h]` for h=1..13 |
+| `X[:, 208:214]` | 208–213 | 6 | Circular stats: circmean\_V, circstd\_V, circmean\_I, circstd\_I, circmean\_cross, circstd\_cross |
+| `X[:, 214:256]` | 214–255 | 42 | DWT subband features, voltage: 36 standard stats + 6 transient-boosters |
+| `X[:, 256:298]` | 256–297 | 42 | DWT subband features, current: same 42-feature pattern |
 
-**Total: 282. Verified passing in tests.**
+**Total: 298. Verified passing in tests.**
 
 ### 1.3 Model Input Slices (Critical — Use These Exactly)
 
-The M4 model has three branches. Each branch receives a different slice of the data:
+The phase-aware hybrid model (historical ablation label `M4`) has three branches. Each branch receives a different slice of the data:
 
 ```python
 # Branch 1: Raw normalized waveform — from preprocess_frame(), NOT from features.py
 X_wave  = np.stack([v_norm, i_norm], axis=-1)   # shape: (500, 2)
 
 # Branch 2: Magnitude features — FFT magnitudes + THD only
-X_mag   = X_full[:, 24:52]                       # shape: (28,)
-# Indices 24:52 = [13 V mags] + [13 I mags] + [THD_V, THD_I] = 28 features
+X_mag   = X_full[:, 28:56]                       # shape: (28,)
+# Indices 28:56 = [13 V mags] + [13 I mags] + [THD_V, THD_I] = 28 features
 
-# Branch 3: Phase + DWT + time-domain features
+# Branch 3: Phase + DWT + time-domain + power-metric features
 X_phase = np.concatenate([
-    X_full[:, 0:24],     # time-domain stats (24)
-    X_full[:, 52:210],   # all phase blocks (158): abs_phase(52) + cross(26) + rel(48) + powers(26) + circ(6)
-    X_full[:, 210:282],  # DWT features (72)
-], axis=1)               # shape: (254,)
+    X_full[:, 0:28],     # time-domain stats (24) + overall power metrics (4)
+    X_full[:, 56:214],   # all phase blocks (158): abs_phase(52) + cross(26) + rel(48) + powers(26) + circ(6)
+    X_full[:, 214:298],  # DWT features (84)
+], axis=1)               # shape: (270,)
 ```
 
-Verify: `28 + 254 = 282`. The time-domain stats (24) appear in both X_mag (indirectly via M1/M3's combined input) and X_phase (explicitly). They are reused across branches by design.
+Verify: `28 + 270 = 298`. The time-domain stats and overall power metrics (28 total) appear in both the phase branch and the broader phase-free branch used by M1/M3. They are reused across branches by design.
 
-For M1 (magnitude MLP) and M3 (CNN-LSTM + magnitude), the magnitude branch input is: `np.concatenate([X_full[:, 0:24], X_full[:, 24:52]], axis=1)` = time-domain (24) + FFT+THD (28) = 52 features.
+For M1 (magnitude MLP) and M3 (CNN-LSTM + magnitude), the phase-free branch input is: `np.concatenate([X_full[:, 0:28], X_full[:, 28:56]], axis=1)` = time-domain + power metrics (28) + FFT+THD (28) = 56 features.
 
 ---
 
@@ -391,7 +399,7 @@ from src.dsp.features import extract_features
 from src.dsp.preprocess import remove_dc_offset
 
 v_dc, i_dc = remove_dc_offset(v_sig, i_sig)   # remove mean (already ~0 for generated signals)
-feat_vec    = extract_features(v_dc, i_dc)     # returns float32[282]
+feat_vec    = extract_features(v_dc, i_dc)     # returns float32[298]
 ```
 
 Store the dataset as numpy arrays:
@@ -399,7 +407,7 @@ Store the dataset as numpy arrays:
 ```python
 # artifacts/datasets/synth_v1/
 X_wave_train.npy    # shape: (28000, 500, 2)  — stacked [v_norm, i_norm]
-X_feat_train.npy    # shape: (28000, 282)     — feature vectors
+X_feat_train.npy    # shape: (28000, 298)     — feature vectors
 y_train.npy         # shape: (28000,)          — integer class labels 0–6
 
 # Same pattern for val and test
@@ -426,17 +434,17 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 from pathlib import Path
 
-scaler_mag      = StandardScaler()  # for 28-feature branch (24:52)
-scaler_phase    = StandardScaler()  # for 254-feature branch
-scaler_mag_full = StandardScaler()  # for 52-feature M1/M3 branch (0:52)
+scaler_mag      = StandardScaler()  # for 28-feature branch (28:56)
+scaler_phase    = StandardScaler()  # for 270-feature branch
+scaler_mag_full = StandardScaler()  # for 56-feature M1/M3 branch (0:56)
 
-X_mag_train   = X_feat_train[:, 24:52]     # shape (28000, 28)
+X_mag_train   = X_feat_train[:, 28:56]     # shape (28000, 28)
 X_phase_train = np.concatenate([
-    X_feat_train[:, 0:24],
-    X_feat_train[:, 52:210],
-    X_feat_train[:, 210:282],
-], axis=1)                                   # shape (28000, 254)
-X_mag_full_train = X_feat_train[:, 0:52]     # shape (28000, 52)
+    X_feat_train[:, 0:28],
+    X_feat_train[:, 56:214],
+    X_feat_train[:, 214:298],
+], axis=1)                                   # shape (28000, 270)
+X_mag_full_train = X_feat_train[:, 0:56]     # shape (28000, 56)
 
 scaler_mag.fit(X_mag_train)
 scaler_phase.fit(X_phase_train)
@@ -477,14 +485,14 @@ X_mag_full_train_s = scaler_mag_full.transform(X_mag_full_train)
   },
   "total_samples": 38500,
   "counts_per_class_train": {"0":4000,"1":4000,"2":4000,"3":4000,"4":4000,"5":4000,"6":4000},
-  "feature_length": 282,
+  "feature_length": 298,
   "generated_at": "<ISO timestamp>"
 }
 ```
 
 ### 3.8 Chunk 4 Acceptance Criteria
 
-- [ ] `artifacts/datasets/synth_v1/X_feat_train.npy` exists, shape `(28000, 282)`
+- [ ] `artifacts/datasets/synth_v1/X_feat_train.npy` exists, shape `(28000, 298)`
 - [ ] `artifacts/datasets/synth_v1/X_wave_train.npy` exists, shape `(28000, 500, 2)`
 - [ ] Per-class counts in train are exactly 4000 each
 - [ ] Re-running generator with same seed produces byte-identical arrays
@@ -496,6 +504,8 @@ X_mag_full_train_s = scaler_mag_full.transform(X_mag_full_train)
 
 ## 4. Chunk 5 — Model Architectures M1–M4
 
+`M4` remains the historical research/ablation label in this section. For runtime, deployment, and user-facing docs, prefer `tflite` when referring to the production path.
+
 **Files:** `src/models/m1_baseline.py`, `m2_waveform.py`, `m3_waveform_mag.py`, `m4_phase_aware.py`, `factory.py`
 **Test:** `tests/test_model_shapes.py`
 
@@ -505,16 +515,16 @@ All models output a 7-class softmax probability vector. All use `categorical_cro
 
 **Purpose:** Lower-bound baseline. Conventional magnitude-centric approach. No raw waveform, no phase, no DWT.
 
-**Input:** `X_mag_scaled` — shape `(batch, 52)` — time-domain stats (24) + FFT mags (26) + THD (2)
+**Input:** `X_mag_scaled` — shape `(batch, 56)` — time-domain stats + power metrics (28) + FFT mags + THD (28)
 
 ```python
-# NOTE: M1 uses the full 52-feature magnitude+time-domain block, not just 28.
-# This is the "magnitude-only" baseline as described: time-domain stats + FFT mags + THD.
-# Slice it as: X_full[:, 0:52]
+# NOTE: M1 uses the full 56-feature phase-free block, not just 28.
+# This is the "magnitude-only" baseline as described: time-domain stats + power metrics + FFT mags + THD.
+# Slice it as: X_full[:, 0:56]
 
 from tensorflow.keras import layers, Model, Input
 
-def build_m1(n_mag_feats=52, n_classes=7):
+def build_m1(n_mag_feats=56, n_classes=7):
     x_in  = Input(shape=(n_mag_feats,), name="magnitude_input")
     x     = layers.Dense(128, activation="relu")(x_in)
     x     = layers.Dropout(0.3)(x)
@@ -566,10 +576,10 @@ def build_m2(n_samples=500, n_channels=2, n_classes=7):
 
 **Inputs:**
 - `X_wave` — shape `(batch, 500, 2)`
-- `X_mag_scaled` — shape `(batch, 52)` — time-domain + FFT + THD (full 52-feature block, scaled)
+- `X_mag_scaled` — shape `(batch, 56)` — time-domain + power metrics + FFT + THD (full 56-feature block, scaled)
 
 ```python
-def build_m3(n_samples=500, n_channels=2, n_mag_feats=52, n_classes=7):
+def build_m3(n_samples=500, n_channels=2, n_mag_feats=56, n_classes=7):
     # Branch 1: CNN-LSTM (identical to M2)
     waveform_in = Input(shape=(n_samples, n_channels), name="waveform_input")
     x = layers.Conv1D(32, 7, padding="same", use_bias=False)(waveform_in)
@@ -603,15 +613,15 @@ def build_m3(n_samples=500, n_channels=2, n_mag_feats=52, n_classes=7):
 
 ### 4.4 M4 — Full Phase-Aware Hybrid (The Proposed Model)
 
-**Purpose:** Full model with all three branches. This is the main contribution. The accuracy delta M4 − M3 is the project's key result.
+**Purpose:** Full model with all three branches. This is the main research contribution. The accuracy delta M4 − M3 is the project's key result, while deployment consumes the exported `tflite` artifact rather than the legacy `model4` runtime term.
 
 **Inputs:**
 - `X_wave` — shape `(batch, 500, 2)` — normalized waveform
-- `X_mag_scaled` — shape `(batch, 28)` — FFT magnitudes + THD only (indices 24:52 of feature vector)
-- `X_phase_scaled` — shape `(batch, 254)` — phase + DWT + time-domain (concatenation of 0:24, 52:210, 210:282)
+- `X_mag_scaled` — shape `(batch, 28)` — FFT magnitudes + THD only (indices 28:56 of feature vector)
+- `X_phase_scaled` — shape `(batch, 270)` — phase + DWT + time-domain + power metrics (concatenation of 0:28, 56:214, 214:298)
 
 ```python
-def build_m4(n_samples=500, n_channels=2, n_mag_feats=28, n_phase_dwt_feats=254, n_classes=7):
+def build_m4(n_samples=500, n_channels=2, n_mag_feats=28, n_phase_dwt_feats=270, n_classes=7):
     # ── Branch 1: Raw Waveform CNN-LSTM ──────────────────────────────────────
     waveform_in = Input(shape=(n_samples, n_channels), name="waveform_input")
     x = layers.Conv1D(32, 7, padding="same", use_bias=False)(waveform_in)
@@ -689,17 +699,17 @@ def get_model_inputs(X_feat: np.ndarray, X_wave: np.ndarray,
     Given raw feature matrix and waveform matrix, returns the correct
     tuple of inputs for the specified model variant.
 
-    X_feat  : float32 (batch, 282)  — raw feature vectors (unscaled)
+    X_feat  : float32 (batch, 298)  — raw feature vectors (unscaled)
     X_wave  : float32 (batch, 500, 2) — normalized waveforms [v_norm, i_norm]
     variant : "M1", "M2", "M3", or "M4"
     """
-    X_mag_raw   = X_feat[:, 24:52]
+    X_mag_raw   = X_feat[:, 28:56]
     X_phase_raw = np.concatenate([
-        X_feat[:, 0:24],
-        X_feat[:, 52:210],
-        X_feat[:, 210:282],
+        X_feat[:, 0:28],
+        X_feat[:, 56:214],
+        X_feat[:, 214:298],
     ], axis=1)
-    X_mag_full  = X_feat[:, 0:52]   # for M1 and M3 (52 features)
+    X_mag_full  = X_feat[:, 0:56]   # for M1 and M3 (56 features)
 
     X_mag_s      = scaler_mag.transform(X_mag_raw)
     X_phase_s    = scaler_phase.transform(X_phase_raw)
@@ -721,10 +731,10 @@ def get_model_inputs(X_feat: np.ndarray, X_wave: np.ndarray,
 
 - [ ] Each model builds without error: `build_m1()`, `build_m2()`, `build_m3()`, `build_m4()`
 - [ ] `tests/test_model_shapes.py` passes:
-  - M1: single forward pass with input `(1, 52)` → output `(1, 7)`, all probs sum to 1
+  - M1: single forward pass with input `(1, 56)` → output `(1, 7)`, all probs sum to 1
   - M2: single forward pass with `(1, 500, 2)` → `(1, 7)`
-  - M3: inputs `[(1,500,2), (1,52)]` → `(1,7)`
-  - M4: inputs `[(1,500,2), (1,28), (1,254)]` → `(1,7)`
+  - M3: inputs `[(1,500,2), (1,56)]` → `(1,7)`
+  - M4: inputs `[(1,500,2), (1,28), (1,270)]` → `(1,7)`
 - [ ] `model.summary()` exported to `artifacts/models/<variant>_summary.txt`
 - [ ] All four models importable from `src.models.factory.build_model`
 
@@ -800,6 +810,7 @@ Every training run creates a timestamped directory:
 artifacts/runs/<variant>_<YYYYMMDD_HHMMSS>/
 ├── best_model.keras           # saved by ModelCheckpoint
 ├── final_model.keras          # saved after training completes (may differ if early stopped)
+├── production_model.tflite    # deployable export; copy to artifacts/models/pqm_multilabel_model.tflite
 ├── scaler_mag.pkl             # copy from artifacts/scalers/ (for self-contained run)
 ├── scaler_phase.pkl
 ├── scaler_mag_full.pkl
@@ -827,6 +838,7 @@ artifacts/runs/<variant>_<YYYYMMDD_HHMMSS>/
                     "Transient": 0.98, "Flicker": 0.92},
   "training_time_seconds": 2341,
   "model_params": 279842,
+  "production_model_path": "artifacts/models/pqm_multilabel_model.tflite",
   "scaler_mag_path": "artifacts/scalers/scaler_mag_v1.pkl",
     "scaler_phase_path": "artifacts/scalers/scaler_phase_v1.pkl",
     "scaler_mag_full_path": "artifacts/scalers/scaler_mag_full_v1.pkl"
@@ -893,6 +905,7 @@ def plot_history(history_dict, run_dir, variant):
 
 - [ ] `python src/train/train.py --variant M4` completes without error
 - [ ] `artifacts/runs/M4_<timestamp>/best_model.keras` exists and is loadable
+- [ ] `artifacts/models/pqm_multilabel_model.tflite` exists and can be loaded by the runtime
 - [ ] `confusion_matrix_test.png` and `training_curves.png` exist in run directory
 - [ ] `manifest.json` exists with correct fields
 - [ ] `tests/test_train_smoke.py` passes (2-epoch subset run)
@@ -913,7 +926,7 @@ Run all four variants on the **same fixed splits** (synth_v1 from Chunk 4):
 | M1 | ✗ | ✓ (52 feat) | ✗ | time+mag features only |
 | M2 | ✓ | ✗ | ✗ | raw waveform only |
 | M3 | ✓ | ✓ (52 feat) | ✗ | waveform + magnitude |
-| M4 | ✓ | ✓ (28 feat) | ✓ (254 feat) | all three branches |
+| M4 | ✓ | ✓ (28 feat) | ✓ (270 feat) | all three branches |
 
 ### 6.2 Key Comparison
 
@@ -993,7 +1006,7 @@ If your numbers are significantly below these ranges, likely causes:
 
 If M4 < M3 (phase hurts accuracy), likely causes:
 1. Von Mises κ too high → over-concentrated → model overfits to specific phase angles that don't generalize
-2. Phase feature slicing is wrong (re-verify the 52:210 indices)
+2. Phase feature slicing is wrong (re-verify the 56:214 indices)
 3. Phase branch has too many parameters relative to dataset size → increase dropout to 0.4
 
 ---
@@ -1125,6 +1138,7 @@ You are done when ALL of the following are true:
 - [ ] All 4 models build and accept correct input shapes (verified by test)
 - [ ] All 4 training runs complete and produce artifacts in `artifacts/runs/`
 - [ ] M4 test accuracy > M3 test accuracy (phase features help, even if by a small margin)
+- [ ] `artifacts/models/pqm_multilabel_model.tflite` exists as the canonical production export
 - [ ] `artifacts/ablation/ablation_results.csv` has all 4 rows
 - [ ] `artifacts/ablation/ablation_report.md` exists with delta highlighted
 - [ ] All 4 confusion matrices saved
@@ -1134,4 +1148,4 @@ You are done when ALL of the following are true:
 
 ---
 
-*This document is the single source of truth for the ML subsystem. If anything in this document conflicts with `legacy/`, trust this document. If anything conflicts with `prd.md`, trust `prd.md`. If anything conflicts with `configs/default.yaml`, trust `default.yaml`.*
+*This document is the single source of truth for the ML subsystem. If anything in this document conflicts with `legacy/`, trust this document. If anything conflicts with older `282`/`model4` deployment wording, trust the active `298` + `tflite` contract documented here and in `README.md`.*
