@@ -27,6 +27,8 @@ def test_platformio_uses_teensy_cli_for_pi_headless_uploads() -> None:
 
     assert "upload_protocol = teensy-cli" in model4_block
     assert "upload_protocol = teensy-cli" in raw_block
+    assert "-DPQ_FREE_RUN_FALLBACK=1" in model4_block
+    assert "-DPQ_FREE_RUN_FALLBACK=1" in raw_block
 
 
 def test_live_infer_defaults_to_tflite_mode() -> None:

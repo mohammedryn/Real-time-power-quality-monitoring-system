@@ -18,6 +18,14 @@
 #define PQ_DEBUG_TIMING 0
 #endif
 
+#ifndef PQ_FREE_RUN_FALLBACK
+#define PQ_FREE_RUN_FALLBACK 0
+#endif
+
+#ifndef PQ_TRIGGER_TIMEOUT_SAMPLES
+#define PQ_TRIGGER_TIMEOUT_SAMPLES 250
+#endif
+
 // ---- Compile-time hardware constants (Teensy 4.1) ----
 static constexpr uint8_t PIN_VOLTAGE_ADC0 = A0;   // Pin 14 -> ADC0
 static constexpr uint8_t PIN_CURRENT_ADC1 = A10;  // Pin 24 -> ADC1
@@ -68,6 +76,7 @@ volatile bool     collecting  = false;
 volatile uint16_t sampleCount = 0;
 volatile int16_t  prevV = ADC_MIDPOINT;
 volatile int32_t  vMidAccum = static_cast<int32_t>(ADC_MIDPOINT) << ZC_MID_SHIFT;
+volatile uint16_t idleSamplesWithoutTrigger = 0;
 
 static uint16_t frameSeq = 0;
 
@@ -106,21 +115,34 @@ void FASTRUN sampleISR() {
     vMidAccum += static_cast<int32_t>(v) - (vMidAccum >> ZC_MID_SHIFT);
     int16_t vMid = static_cast<int16_t>(vMidAccum >> ZC_MID_SHIFT);
 
+    bool startCollection = false;
+
 #if PQ_BENCH_MODE
     if (!collecting && !windowReady) {
-        collecting  = true;
-        sampleCount = 0;
+        startCollection = true;
     }
 #else
     bool risingZC =
         (prevV <  (vMid - ZC_HYSTERESIS)) &&
         (v     >= (vMid + ZC_HYSTERESIS));
 
-    if (!collecting && !windowReady && risingZC) {
-        collecting  = true;
-        sampleCount = 0;
+    if (!collecting && !windowReady) {
+        if (risingZC) {
+            startCollection = true;
+        }
+#if PQ_FREE_RUN_FALLBACK
+        else if (++idleSamplesWithoutTrigger >= PQ_TRIGGER_TIMEOUT_SAMPLES) {
+            startCollection = true;
+        }
+#endif
     }
 #endif
+
+    if (startCollection) {
+        collecting = true;
+        sampleCount = 0;
+        idleSamplesWithoutTrigger = 0;
+    }
 
     if (collecting) {
         v_buf[sampleCount] = v;
