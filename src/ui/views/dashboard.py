@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 from src.runtime.pipeline import InferenceSnapshot
 from src.ui.views.events import EventTimelineWidget
@@ -30,7 +30,7 @@ class DashboardView(QtWidgets.QWidget):
         top_row.addWidget(self._timestamp, stretch=0)
 
         middle = QtWidgets.QSplitter()
-        middle.setOrientation(1)  # Vertical
+        middle.setOrientation(QtCore.Qt.Orientation.Vertical)
         root.addWidget(middle, stretch=1)
 
         top_panels = QtWidgets.QWidget()

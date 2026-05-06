@@ -22,6 +22,12 @@ def test_ui_defaults_to_tflite_mode() -> None:
     assert 'default="tflite"' in text
 
 
+def test_dashboard_uses_qt_orientation_enum() -> None:
+    text = Path("src/ui/views/dashboard.py").read_text(encoding="utf-8")
+    assert "QtCore.Qt.Orientation.Vertical" in text
+    assert "setOrientation(1)" not in text
+
+
 def test_readme_mentions_tflite_and_298_contract() -> None:
     text = Path("README.md").read_text(encoding="utf-8")
     assert "Feature vector length: `298`" in text
