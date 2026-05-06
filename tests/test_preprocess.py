@@ -8,10 +8,12 @@ from src.dsp.preprocess import load_config, preprocess_frame
 def test_preprocess_outputs_shape_and_finite_values():
     cfg = load_config("configs/default.yaml")
     n = int(cfg["signal"]["samples_per_frame"])
+    v_mid = int(cfg["calibration"]["v_adc_midpoint"])
+    i_mid = int(cfg["calibration"]["i_adc_midpoint"])
 
     t = np.linspace(0.0, 1.0, n, endpoint=False)
-    v_raw = (2071 + 120 * np.sin(2.0 * np.pi * 5.0 * t)).astype(np.int16)
-    i_raw = (2048 + 80 * np.sin(2.0 * np.pi * 5.0 * t + 0.2)).astype(np.int16)
+    v_raw = (v_mid + 120 * np.sin(2.0 * np.pi * 5.0 * t)).astype(np.int16)
+    i_raw = (i_mid + 80 * np.sin(2.0 * np.pi * 5.0 * t + 0.2)).astype(np.int16)
 
     out = preprocess_frame(v_raw, i_raw, cfg)
 
