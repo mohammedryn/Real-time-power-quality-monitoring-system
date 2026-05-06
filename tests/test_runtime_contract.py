@@ -20,6 +20,15 @@ def test_config_defaults_to_tflite_receiver_mode() -> None:
     assert cfg["ml_inference"]["receiver_mode"] == "tflite"
 
 
+def test_platformio_uses_teensy_cli_for_pi_headless_uploads() -> None:
+    text = Path("firmware/teensy/pq_firmware/platformio.ini").read_text(encoding="utf-8")
+    model4_block = text.split("[env:teensy41_model4]", 1)[1].split("[env:", 1)[0]
+    raw_block = text.split("[env:teensy41_raw]", 1)[1].split("[env:", 1)[0]
+
+    assert "upload_protocol = teensy-cli" in model4_block
+    assert "upload_protocol = teensy-cli" in raw_block
+
+
 def test_live_infer_defaults_to_tflite_mode() -> None:
     text = Path("src/infer/live_infer.py").read_text(encoding="utf-8")
     assert 'choices=["tflite", "raw"]' in text
