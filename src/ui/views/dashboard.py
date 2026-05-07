@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 
 from pyqtgraph.Qt import QtCore, QtWidgets
 
@@ -59,7 +60,8 @@ class DashboardView(QtWidgets.QWidget):
         metrics_grid = QtWidgets.QGridLayout(self._metrics_group)
         self._metric_labels: dict[str, QtWidgets.QLabel] = {}
         metric_order = [
-            ("rms_v", "RMS-V"),
+            ("v_peak", "Vpeak-V"),
+            ("v_rms_derived", "Vrms-V"),
             ("rms_i", "RMS-I"),
             ("thd_v", "THD-V"),
             ("thd_i", "THD-I"),
@@ -108,7 +110,8 @@ class DashboardView(QtWidgets.QWidget):
         )
 
         metrics = snapshot.metrics
-        self._metric_labels["rms_v"].setText(f"{metrics['rms_v']:.3f} V")
+        self._metric_labels["v_peak"].setText(f"{metrics['rms_v']:.3f} V")
+        self._metric_labels["v_rms_derived"].setText(f"{metrics['rms_v'] / math.sqrt(2.0):.3f} V")
         self._metric_labels["rms_i"].setText(f"{metrics['rms_i']:.3f} A")
         self._metric_labels["thd_v"].setText(f"{metrics['thd_v'] * 100.0:.2f}%")
         self._metric_labels["thd_i"].setText(f"{metrics['thd_i'] * 100.0:.2f}%")

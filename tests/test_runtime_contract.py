@@ -58,6 +58,13 @@ def test_dashboard_uses_qt_orientation_enum() -> None:
     assert "setOrientation(1)" not in text
 
 
+def test_dashboard_displays_voltage_peak_and_derived_rms() -> None:
+    text = Path("src/ui/views/dashboard.py").read_text(encoding="utf-8")
+    assert '("v_peak", "Vpeak-V")' in text
+    assert '("v_rms_derived", "Vrms-V")' in text
+    assert "metrics['rms_v'] / math.sqrt(2.0)" in text
+
+
 def test_readme_mentions_tflite_and_298_contract() -> None:
     text = Path("README.md").read_text(encoding="utf-8")
     assert "Feature vector length: `298`" in text
