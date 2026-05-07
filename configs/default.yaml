@@ -28,7 +28,7 @@ signal:
   harmonic_orders: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 
 calibration:
-  v_adc_midpoint: 2007
+  v_adc_midpoint: 1985
   i_adc_midpoint: 2048
   v_counts_to_volts: 0.25745427626960726
   i_counts_to_amps: 0.030518

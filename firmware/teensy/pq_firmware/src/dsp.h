@@ -39,8 +39,9 @@ static constexpr float V_FRONTEND_GAIN =
     AMC1301_DIFF_GAIN *
     TLV9001_DIFF_GAIN;
 
-// Bench-measured zero-input bias on the current board is ~2007 counts.
-static constexpr float V_MIDPOINT = 2007.0f;
+// Measured DC bias at A0 (pin 14) on the current hardware is approximately
+// 1.6 V, which corresponds to about 1985 ADC counts at 3.3 V full scale.
+static constexpr float V_MIDPOINT = 1985.0f;
 // Converts ADC counts (after midpoint removal) back to mains volts.
 static constexpr float V_SCALE =
     ADC_REF_VOLTS / (ADC_MAX_COUNTS * V_FRONTEND_GAIN);

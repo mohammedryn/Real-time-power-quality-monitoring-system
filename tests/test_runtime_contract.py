@@ -9,7 +9,7 @@ def test_config_voltage_calibration_matches_amc1301_tlv9001_frontend() -> None:
     cfg = yaml.safe_load(Path("configs/default.yaml").read_text(encoding="utf-8"))
     calib = cfg["calibration"]
 
-    assert calib["v_adc_midpoint"] == 2007
+    assert calib["v_adc_midpoint"] == 1985
     assert calib["v_counts_to_volts"] == 3.3 / (
         4095.0 * ((560.0 / (2200000.0 + 560.0)) * 8.2 * 1.5)
     )
