@@ -31,6 +31,15 @@ def test_platformio_uses_teensy_cli_for_pi_headless_uploads() -> None:
     assert "-DPQ_FREE_RUN_FALLBACK=1" in raw_block
 
 
+def test_pq_firmware_uses_direct_analog_reads_for_frame_capture() -> None:
+    text = Path("firmware/teensy/pq_firmware/src/main.cpp").read_text(encoding="utf-8")
+
+    assert "analogRead(PIN_VOLTAGE_ADC0)" in text
+    assert "analogRead(PIN_CURRENT_ADC1)" in text
+    assert "readSynchronizedSingle" not in text
+    assert "startSynchronizedSingleRead" not in text
+
+
 def test_live_infer_defaults_to_tflite_mode() -> None:
     text = Path("src/infer/live_infer.py").read_text(encoding="utf-8")
     assert 'choices=["tflite", "raw"]' in text

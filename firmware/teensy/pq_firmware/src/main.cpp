@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <ADC.h>
 #include <FastCRC.h>
 #include "dsp.h"
 
@@ -65,7 +64,6 @@ static constexpr uint16_t PAYLOAD_BYTES =
 static constexpr uint16_t FRAME_BYTES = 4 + PAYLOAD_BYTES + 4;
 #endif
 
-ADC*          adc = new ADC();
 FastCRC32     crc32;
 IntervalTimer sampleTimer;
 
@@ -90,25 +88,15 @@ static inline void write_u32_be(uint32_t value) {
 }
 
 void setupADC() {
-    adc->adc0->setAveraging(4);
-    adc->adc0->setResolution(12);
-    adc->adc0->setConversionSpeed(ADC_CONVERSION_SPEED::HIGH_SPEED);
-    adc->adc0->setSamplingSpeed(ADC_SAMPLING_SPEED::HIGH_SPEED);
-    adc->adc0->setReference(ADC_REFERENCE::REF_3V3);
-
-    adc->adc1->setAveraging(4);
-    adc->adc1->setResolution(12);
-    adc->adc1->setConversionSpeed(ADC_CONVERSION_SPEED::HIGH_SPEED);
-    adc->adc1->setSamplingSpeed(ADC_SAMPLING_SPEED::HIGH_SPEED);
-    adc->adc1->setReference(ADC_REFERENCE::REF_3V3);
+    analogReadResolution(12);
+    analogReadAveraging(4);
 }
 
 void FASTRUN sampleISR() {
-    ADC::Sync_result result = adc->readSynchronizedSingle();
-    int16_t v = static_cast<int16_t>(result.result_adc0);
-    int16_t i = static_cast<int16_t>(result.result_adc1);
-
-    adc->startSynchronizedSingleRead(PIN_VOLTAGE_ADC0, PIN_CURRENT_ADC1);
+    // Direct reads are a few microseconds apart, but this path matches the
+    // proven adc_probe sketch and avoids the broken zero-frame sync-read path.
+    int16_t v = static_cast<int16_t>(analogRead(PIN_VOLTAGE_ADC0));
+    int16_t i = static_cast<int16_t>(analogRead(PIN_CURRENT_ADC1));
 
     // Track the DC bias slowly so the zero-cross trigger follows the actual
     // AMC1301/TLV9001 midpoint instead of relying on the old 2071-count bias.
@@ -275,7 +263,6 @@ static void sendModelReadyFrame() {
 void setup() {
     Serial.begin(0);  // USB CDC; baud rate ignored
     setupADC();
-    adc->startSynchronizedSingleRead(PIN_VOLTAGE_ADC0, PIN_CURRENT_ADC1);
     sampleTimer.begin(sampleISR, SAMPLE_PERIOD_US);
 }
 
