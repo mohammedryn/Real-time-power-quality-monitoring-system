@@ -13,4 +13,4 @@ fi
 # Build firmware for Teensy 4.1 using platformio.ini in firmware directory.
 pio run -d "$FIRMWARE_DIR"
 
-echo "Firmware compile succeeded for PlatformIO env: teensy41"
+echo "Legacy Teensy firmware compile succeeded. Active migration target is ESP32-P4."

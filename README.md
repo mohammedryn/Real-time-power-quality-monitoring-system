@@ -1,6 +1,6 @@
 # Real-Time Power Quality Monitoring
 
-Non-ML integration repository for a Raspberry Pi kiosk that receives Teensy power-quality frames, runs live or replay inference, and displays a touch dashboard.
+Non-ML integration repository for a Raspberry Pi kiosk that receives power-quality frames, runs live or replay inference, and displays a touch dashboard. The active MCU migration path is ESP32-P4, while the Teensy firmware remains available as a legacy fallback during migration.
 
 This repository preserves the fixed acquisition and feature contract used by the firmware and host runtime:
 
@@ -10,6 +10,7 @@ This repository preserves the fixed acquisition and feature contract used by the
 - Production model artifact: `artifacts/models/pqm_multilabel_model.tflite`
 - Public live mode: `tflite`
 - Serial frame compatibility is defined in `src/io/frame_protocol.py`
+- Legacy Teensy firmware is preserved under `legacy/teensyfirmware/`
 
 ## Environment Setup
 
@@ -27,7 +28,24 @@ pip install -r requirements.txt
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 ```
 
-## Firmware Compile Command
+## Firmware Targets
+
+Active MCU target:
+
+```bash
+PQ_RAW_MODE=1 ./scripts/compile_esp32p4_firmware.sh
+./scripts/flash_esp32p4_firmware.sh /dev/ttyACM0
+PQ_RAW_MODE=0 ./scripts/compile_esp32p4_firmware.sh
+./scripts/flash_esp32p4_firmware.sh /dev/ttyACM0
+```
+
+Legacy Teensy firmware is preserved under:
+
+```text
+legacy/teensyfirmware/
+```
+
+The old Teensy build remains available for reference and emergency fallback:
 
 ```bash
 ./scripts/compile_teensy_firmware.sh

@@ -19,10 +19,22 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q
 3. Verify firmware build:
 
 ```bash
-./scripts/compile_teensy_firmware.sh
+PQ_RAW_MODE=1 ./scripts/compile_esp32p4_firmware.sh
 ```
 
 4. Confirm serial device path and permissions.
+
+5. Validate raw frame transport before the demo:
+
+```bash
+python scripts/probe_esp32p4_raw.py --port /dev/ttyACM0 --frames 5
+python -m src.infer.live_infer \
+  --port /dev/ttyACM0 \
+  --config configs/default.yaml \
+  --receiver-mode raw \
+  --max-frames 10
+PQ_RAW_MODE=0 ./scripts/compile_esp32p4_firmware.sh
+```
 
 ## Demo Sequence
 1. Start UI (live mode):
@@ -65,3 +77,4 @@ If live hardware is unavailable:
 - latest pytest output summary
 - firmware build success log
 - parity/timing artifacts if hardware session performed
+- ESP32-P4 raw probe output when hardware session performed

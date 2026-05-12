@@ -7,7 +7,7 @@
 
 ## 1. System Preparation
 1. Install Raspberry Pi OS (64-bit) and update packages.
-2. Enable serial USB access and verify Teensy appears as /dev/ttyACM0 (or note actual port).
+2. Enable serial USB access and verify the active MCU appears as /dev/ttyACM0 (or note actual port).
 3. Install Python 3.10+ and venv support.
 
 ## 2. Application Setup
@@ -43,6 +43,19 @@ sudo ./src/system/kiosk_setup.sh \
   --receiver-mode tflite
 ```
 
+## ESP32-P4 Pre-Live Validation
+
+```bash
+PQ_RAW_MODE=1 ./scripts/compile_esp32p4_firmware.sh
+./scripts/flash_esp32p4_firmware.sh /dev/ttyACM0
+python scripts/probe_esp32p4_raw.py --port /dev/ttyACM0 --frames 5
+PQ_RAW_MODE=0 ./scripts/compile_esp32p4_firmware.sh
+./scripts/flash_esp32p4_firmware.sh /dev/ttyACM0
+python -m src.infer.live_infer --port /dev/ttyACM0 --config configs/default.yaml --receiver-mode tflite --max-frames 10
+```
+
+Proceed to the UI only after the CLI reports scored frames and zero CRC failures.
+
 ## 5. Verify Service Health
 ```bash
 sudo systemctl status pq-monitor.service --no-pager -n 50
@@ -72,9 +85,20 @@ sudo systemctl restart pq-monitor.service
 3. Check pyqtgraph/pyside dependency issues in journal logs.
 
 ## 8. Hardware-Dependent Validation Commands
-These require connected Teensy hardware.
+These require connected hardware. Use the ESP32-P4 path first; keep the Teensy path as a fallback/reference.
 
-Firmware build:
+ESP32-P4 firmware build:
+```bash
+PQ_RAW_MODE=1 ./scripts/compile_esp32p4_firmware.sh
+PQ_RAW_MODE=0 ./scripts/compile_esp32p4_firmware.sh
+```
+
+ESP32-P4 raw probe:
+```bash
+python scripts/probe_esp32p4_raw.py --port /dev/ttyACM0 --frames 5
+```
+
+Legacy Teensy firmware build:
 ```bash
 ./scripts/compile_teensy_firmware.sh
 ```
@@ -98,5 +122,5 @@ Timing capture (PQ_DEBUG_TIMING firmware build):
 ## 9. Success Criteria
 1. Boot-to-dashboard within 30 seconds.
 2. UI remains responsive with sustained acquisition.
-3. Service auto-recovers after unplug/replug of Teensy.
+3. Service auto-recovers after unplug/replug of the active MCU.
 4. Logs persist and remain bounded by rotation policy.
