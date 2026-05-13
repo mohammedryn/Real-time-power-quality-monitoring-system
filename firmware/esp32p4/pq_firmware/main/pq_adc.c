@@ -20,16 +20,19 @@ static TaskHandle_t              s_frame_task   = NULL;
 
 static int16_t           s_v_buf[PQ_FRAME_SAMPLES];
 static int16_t           s_i_buf[PQ_FRAME_SAMPLES];
-static volatile uint32_t s_count      = 0;
-static volatile bool     s_collecting = false;
+static volatile uint32_t s_count        = 0;
+static volatile bool     s_collecting   = false;
+static volatile uint32_t s_timer_ticks  = 0;
 
 static void timer_cb(void *arg)
 {
+    s_timer_ticks++;
     xTaskNotifyGive(s_sample_task);
 }
 
 static void sample_task_fn(void *arg)
 {
+    ESP_LOGI(TAG, "sample_task started");
     while (true) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (!s_collecting) continue;
@@ -62,8 +65,12 @@ void pq_adc_init(void)
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, ADC_CHANNEL_4, &ch_cfg));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, ADC_CHANNEL_5, &ch_cfg));
 
-    xTaskCreatePinnedToCore(sample_task_fn, "adc_samp", 4096, NULL,
-                            configMAX_PRIORITIES - 1, &s_sample_task, 0);
+    BaseType_t rc = xTaskCreatePinnedToCore(sample_task_fn, "adc_samp", 4096, NULL,
+                                            configMAX_PRIORITIES - 1, &s_sample_task, 0);
+    if (rc != pdPASS) {
+        ESP_LOGE(TAG, "sample_task create failed (%d)", rc);
+        return;
+    }
 
     esp_timer_create_args_t timer_args = {
         .callback        = timer_cb,
@@ -86,9 +93,12 @@ bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_S
     uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
     if (!notified) {
         s_collecting = false;
-        ESP_LOGW(TAG, "frame timeout after 5 s");
+        ESP_LOGW(TAG, "frame timeout — timer ticks so far: %lu", s_timer_ticks);
         return false;
     }
+
+    ESP_LOGI(TAG, "frame ready (timer ticks: %lu, v[0]=%d i[0]=%d)",
+             s_timer_ticks, s_v_buf[0], s_i_buf[0]);
 
     memcpy(v_raw, s_v_buf, PQ_FRAME_SAMPLES * sizeof(int16_t));
     memcpy(i_raw, s_i_buf, PQ_FRAME_SAMPLES * sizeof(int16_t));
