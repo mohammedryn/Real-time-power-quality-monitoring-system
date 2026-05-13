@@ -1,139 +1,98 @@
 #include "pq_adc.h"
 
-#include "esp_adc/adc_continuous.h"
+#include <string.h>
 #include "esp_adc/adc_oneshot.h"
-#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "soc/soc_caps.h"
 
 static const char *TAG = "pq_adc";
 
-static adc_continuous_handle_t s_adc = NULL;
-static TaskHandle_t s_task_handle = NULL;
-static volatile uint32_t s_conv_done_count = 0;
+#define SAMPLE_RATE_HZ   10000
+#define SAMPLE_PERIOD_US (1000000 / SAMPLE_RATE_HZ)
 
-static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle,
-                                      const adc_continuous_evt_data_t *edata,
-                                      void *user_data)
+static adc_oneshot_unit_handle_t s_adc1        = NULL;
+static esp_timer_handle_t        s_timer        = NULL;
+static TaskHandle_t              s_sample_task  = NULL;
+static TaskHandle_t              s_frame_task   = NULL;
+
+static int16_t           s_v_buf[PQ_FRAME_SAMPLES];
+static int16_t           s_i_buf[PQ_FRAME_SAMPLES];
+static volatile uint32_t s_count      = 0;
+static volatile bool     s_collecting = false;
+
+static void IRAM_ATTR timer_cb(void *arg)
 {
-    s_conv_done_count++;
-    BaseType_t must_yield = pdFALSE;
-    vTaskNotifyGiveFromISR(s_task_handle, &must_yield);
-    return must_yield == pdTRUE;
+    BaseType_t woken = pdFALSE;
+    vTaskNotifyGiveFromISR(s_sample_task, &woken);
+    portYIELD_FROM_ISR(woken);
 }
 
-/* Read a few oneshot samples to verify GPIO20/21 ADC hardware works at all. */
-static void adc_oneshot_sanity_check(void)
+static void sample_task_fn(void *arg)
 {
-    adc_oneshot_unit_handle_t adc_os = NULL;
-    adc_oneshot_unit_init_cfg_t unit_cfg = { .unit_id = ADC_UNIT_1 };
-    if (adc_oneshot_new_unit(&unit_cfg, &adc_os) != ESP_OK) {
-        ESP_LOGE(TAG, "oneshot: failed to create unit");
-        return;
-    }
-    adc_oneshot_chan_cfg_t ch_cfg = {
-        .atten    = ADC_ATTEN_DB_12,
-        .bitwidth = ADC_BITWIDTH_12,
-    };
-    adc_oneshot_config_channel(adc_os, ADC_CHANNEL_4, &ch_cfg);
-    adc_oneshot_config_channel(adc_os, ADC_CHANNEL_5, &ch_cfg);
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        if (!s_collecting) continue;
 
-    for (int i = 0; i < 5; i++) {
-        int raw4 = -1, raw5 = -1;
-        adc_oneshot_read(adc_os, ADC_CHANNEL_4, &raw4);
-        adc_oneshot_read(adc_os, ADC_CHANNEL_5, &raw5);
-        ESP_LOGI(TAG, "oneshot[%d]: ch4=%d ch5=%d", i, raw4, raw5);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        uint32_t idx = s_count;
+        if (idx >= PQ_FRAME_SAMPLES) continue;
+
+        int v = 0, i_val = 0;
+        adc_oneshot_read(s_adc1, ADC_CHANNEL_4, &v);
+        adc_oneshot_read(s_adc1, ADC_CHANNEL_5, &i_val);
+        s_v_buf[idx] = (int16_t)v;
+        s_i_buf[idx] = (int16_t)i_val;
+
+        if (++s_count >= PQ_FRAME_SAMPLES) {
+            s_collecting = false;
+            xTaskNotifyGive(s_frame_task);
+        }
     }
-    adc_oneshot_del_unit(adc_os);
 }
 
 void pq_adc_init(void)
 {
-    s_task_handle = xTaskGetCurrentTaskHandle();
+    adc_oneshot_unit_init_cfg_t unit_cfg = { .unit_id = ADC_UNIT_1 };
+    ESP_ERROR_CHECK(adc_oneshot_new_unit(&unit_cfg, &s_adc1));
 
-    adc_oneshot_sanity_check();
-
-    adc_continuous_handle_cfg_t handle_cfg = {
-        .max_store_buf_size = 8192,
-        .conv_frame_size = 256,
+    adc_oneshot_chan_cfg_t ch_cfg = {
+        .atten    = ADC_ATTEN_DB_12,
+        .bitwidth = ADC_BITWIDTH_12,
     };
-    ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_cfg, &s_adc));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, ADC_CHANNEL_4, &ch_cfg));
+    ESP_ERROR_CHECK(adc_oneshot_config_channel(s_adc1, ADC_CHANNEL_5, &ch_cfg));
 
-    adc_digi_pattern_config_t pattern[2] = {
-        {
-            .atten     = ADC_ATTEN_DB_12,
-            .channel   = ADC_CHANNEL_4,
-            .unit      = ADC_UNIT_1,
-            .bit_width = ADC_BITWIDTH_12,
-        },
-        {
-            .atten     = ADC_ATTEN_DB_12,
-            .channel   = ADC_CHANNEL_5,
-            .unit      = ADC_UNIT_1,
-            .bit_width = ADC_BITWIDTH_12,
-        },
+    xTaskCreatePinnedToCore(sample_task_fn, "adc_samp", 4096, NULL,
+                            configMAX_PRIORITIES - 1, &s_sample_task, 0);
+
+    esp_timer_create_args_t timer_args = {
+        .callback        = timer_cb,
+        .arg             = NULL,
+        .dispatch_method = ESP_TIMER_ISR,
+        .name            = "adc_tmr",
     };
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, SAMPLE_PERIOD_US));
 
-    adc_continuous_config_t config = {
-        .pattern_num  = 2,
-        .adc_pattern  = pattern,
-        .sample_freq_hz = 20000,
-        .conv_mode    = ADC_CONV_SINGLE_UNIT_1,
-        .format       = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
-    };
-    ESP_ERROR_CHECK(adc_continuous_config(s_adc, &config));
-
-    adc_continuous_evt_cbs_t cbs = {
-        .on_conv_done = s_conv_done_cb,
-    };
-    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(s_adc, &cbs, NULL));
-
-    ESP_ERROR_CHECK(adc_continuous_start(s_adc));
-    ESP_LOGI(TAG, "ADC continuous started: ch4/5, 20000 sps, conv_frame=256");
+    ESP_LOGI(TAG, "ADC timer-oneshot: ch4/5 @ %d Hz (GPIO20/21)", SAMPLE_RATE_HZ);
 }
 
 bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_SAMPLES])
 {
-    uint32_t v_count = 0;
-    uint32_t i_count = 0;
-    uint8_t buf[256];
+    s_frame_task = xTaskGetCurrentTaskHandle();
+    s_count      = 0;
+    s_collecting = true;
 
-    while (v_count < PQ_FRAME_SAMPLES || i_count < PQ_FRAME_SAMPLES) {
-        uint32_t before = s_conv_done_count;
-        uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
-        if (!notified) {
-            ESP_LOGW(TAG, "no DMA notify (callback fires so far: %lu)", s_conv_done_count);
-            return false;
-        }
-
-        uint32_t out_len = 0;
-        esp_err_t err = adc_continuous_read(s_adc, buf, sizeof(buf), &out_len, 0);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "adc_continuous_read err: %s (cb count=%lu, before=%lu)",
-                     esp_err_to_name(err), s_conv_done_count, before);
-            return false;
-        }
-
-        for (uint32_t offset = 0; offset + SOC_ADC_DIGI_RESULT_BYTES <= out_len; offset += SOC_ADC_DIGI_RESULT_BYTES) {
-            adc_digi_output_data_t *sample = (adc_digi_output_data_t *)&buf[offset];
-            uint32_t channel = sample->type2.channel;
-            int16_t raw = (int16_t)(sample->type2.data & 0x0FFFu);
-
-            if (channel == ADC_CHANNEL_4 && v_count < PQ_FRAME_SAMPLES) {
-                v_raw[v_count++] = raw;
-            } else if (channel == ADC_CHANNEL_5 && i_count < PQ_FRAME_SAMPLES) {
-                i_raw[i_count++] = raw;
-            }
-
-            if (v_count >= PQ_FRAME_SAMPLES && i_count >= PQ_FRAME_SAMPLES) {
-                return true;
-            }
-        }
+    uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
+    if (!notified) {
+        s_collecting = false;
+        ESP_LOGW(TAG, "frame timeout after 5 s");
+        return false;
     }
 
+    memcpy(v_raw, s_v_buf, PQ_FRAME_SAMPLES * sizeof(int16_t));
+    memcpy(i_raw, s_i_buf, PQ_FRAME_SAMPLES * sizeof(int16_t));
     return true;
 }
