@@ -54,7 +54,7 @@ bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_S
 
     while (v_count < PQ_FRAME_SAMPLES || i_count < PQ_FRAME_SAMPLES) {
         uint32_t out_len = 0;
-        esp_err_t err = adc_continuous_read(s_adc, buf, sizeof(buf), &out_len, pdMS_TO_TICKS(1000));
+        esp_err_t err = adc_continuous_read(s_adc, buf, sizeof(buf), &out_len, 1000);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "adc_continuous_read failed: %s", esp_err_to_name(err));
             return false;
