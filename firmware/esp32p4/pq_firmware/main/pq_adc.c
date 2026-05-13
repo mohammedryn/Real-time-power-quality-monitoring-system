@@ -22,13 +22,13 @@ void pq_adc_init(void)
     adc_digi_pattern_config_t pattern[2] = {
         {
             .atten = ADC_ATTEN_DB_12,
-            .channel = ADC_CHANNEL_0,
+            .channel = ADC_CHANNEL_4,
             .unit = ADC_UNIT_1,
             .bit_width = ADC_BITWIDTH_12,
         },
         {
             .atten = ADC_ATTEN_DB_12,
-            .channel = ADC_CHANNEL_1,
+            .channel = ADC_CHANNEL_5,
             .unit = ADC_UNIT_1,
             .bit_width = ADC_BITWIDTH_12,
         },
