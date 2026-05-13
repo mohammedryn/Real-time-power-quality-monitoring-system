@@ -43,7 +43,7 @@ void pq_adc_init(void)
     };
     ESP_ERROR_CHECK(adc_continuous_config(s_adc, &config));
     ESP_ERROR_CHECK(adc_continuous_start(s_adc));
-    ESP_LOGI(TAG, "ADC continuous capture started: ADC1 channels 0/1 at 10000 conversions/s");
+    ESP_LOGI(TAG, "ADC continuous capture started: ADC1 channels 4/5 at 10000 conversions/s");
 }
 
 bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_SAMPLES])
@@ -65,9 +65,9 @@ bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_S
             uint32_t channel = sample->type2.channel;
             int16_t raw = (int16_t)(sample->type2.data & 0x0FFFu);
 
-            if (channel == ADC_CHANNEL_0 && v_count < PQ_FRAME_SAMPLES) {
+            if (channel == ADC_CHANNEL_4 && v_count < PQ_FRAME_SAMPLES) {
                 v_raw[v_count++] = raw;
-            } else if (channel == ADC_CHANNEL_1 && i_count < PQ_FRAME_SAMPLES) {
+            } else if (channel == ADC_CHANNEL_5 && i_count < PQ_FRAME_SAMPLES) {
                 i_raw[i_count++] = raw;
             }
 
