@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         "dsp/dsp.cpp"
-        "main.c"
+        "main.cpp"
         "pq_adc.c"
         "pq_frame_protocol.c"
         "pq_serial.c"

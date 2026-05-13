@@ -71,8 +71,6 @@ static void send_raw_frame(void)
 static void send_model_ready_frame(void)
 {
     uint8_t *p = s_payload;
-    uint32_t crc_off = 0;
-    uint32_t crc = 0;
 
     compute_model4_frame(s_v_raw, s_i_raw, s_feat, s_v_norm, s_i_norm);
 
@@ -96,8 +94,8 @@ static void send_model_ready_frame(void)
     pq_write_u32_be(s_frame, PQ_MAGIC);
     memcpy(s_frame + 4, s_payload, PQ_INFERENCE_PAYLOAD_BYTES);
 
-    crc = pq_crc32_le(s_payload, PQ_INFERENCE_PAYLOAD_BYTES);
-    crc_off = 4u + PQ_INFERENCE_PAYLOAD_BYTES;
+    uint32_t crc = pq_crc32_le(s_payload, PQ_INFERENCE_PAYLOAD_BYTES);
+    uint32_t crc_off = 4u + PQ_INFERENCE_PAYLOAD_BYTES;
     s_frame[crc_off + 0u] = (uint8_t)(crc & 0xFFu);
     s_frame[crc_off + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
     s_frame[crc_off + 2u] = (uint8_t)((crc >> 16) & 0xFFu);
@@ -108,7 +106,7 @@ static void send_model_ready_frame(void)
 }
 #endif
 
-void app_main(void)
+extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Booting ESP32-P4 PQ firmware");
     pq_serial_init();

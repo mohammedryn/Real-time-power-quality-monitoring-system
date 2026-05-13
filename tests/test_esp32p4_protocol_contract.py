@@ -44,7 +44,7 @@ def test_esp32p4_dsp_port_sources_exist() -> None:
 
 
 def test_esp32p4_model_ready_path_is_wired() -> None:
-    main_text = Path("firmware/esp32p4/pq_firmware/main/main.c").read_text(encoding="utf-8")
+    main_text = Path("firmware/esp32p4/pq_firmware/main/main.cpp").read_text(encoding="utf-8")
     cmake_text = Path("firmware/esp32p4/pq_firmware/main/CMakeLists.txt").read_text(encoding="utf-8")
     assert "compute_model4_frame" in main_text
     assert "PQ_RAW_MODE" in main_text

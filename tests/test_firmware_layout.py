@@ -17,7 +17,7 @@ def test_esp32p4_firmware_layout_exists() -> None:
     root = Path("firmware/esp32p4/pq_firmware")
     assert (root / "CMakeLists.txt").exists()
     assert (root / "main" / "CMakeLists.txt").exists()
-    assert (root / "main" / "main.c").exists()
+    assert (root / "main" / "main.cpp").exists()
 
 
 def test_esp32p4_build_scripts_exist() -> None:
