@@ -5,17 +5,30 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "soc/soc_caps.h"
 
 static const char *TAG = "pq_adc";
 
 static adc_continuous_handle_t s_adc = NULL;
+static TaskHandle_t s_task_handle = NULL;
+
+static bool IRAM_ATTR s_conv_done_cb(adc_continuous_handle_t handle,
+                                      const adc_continuous_evt_data_t *edata,
+                                      void *user_data)
+{
+    BaseType_t must_yield = pdFALSE;
+    vTaskNotifyGiveFromISR(s_task_handle, &must_yield);
+    return must_yield == pdTRUE;
+}
 
 void pq_adc_init(void)
 {
+    s_task_handle = xTaskGetCurrentTaskHandle();
+
     adc_continuous_handle_cfg_t handle_cfg = {
         .max_store_buf_size = 8192,
-        .conv_frame_size = 512,
+        .conv_frame_size = 256,
     };
     ESP_ERROR_CHECK(adc_continuous_new_handle(&handle_cfg, &s_adc));
 
@@ -42,6 +55,12 @@ void pq_adc_init(void)
         .format = ADC_DIGI_OUTPUT_FORMAT_TYPE2,
     };
     ESP_ERROR_CHECK(adc_continuous_config(s_adc, &config));
+
+    adc_continuous_evt_cbs_t cbs = {
+        .on_conv_done = s_conv_done_cb,
+    };
+    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(s_adc, &cbs, NULL));
+
     ESP_ERROR_CHECK(adc_continuous_start(s_adc));
     ESP_LOGI(TAG, "ADC continuous capture started: ADC1 channels 4/5 at 10000 conversions/s");
 }
@@ -50,11 +69,13 @@ bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_S
 {
     uint32_t v_count = 0;
     uint32_t i_count = 0;
-    uint8_t buf[512];
+    uint8_t buf[256];
 
     while (v_count < PQ_FRAME_SAMPLES || i_count < PQ_FRAME_SAMPLES) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
+
         uint32_t out_len = 0;
-        esp_err_t err = adc_continuous_read(s_adc, buf, sizeof(buf), &out_len, 1000);
+        esp_err_t err = adc_continuous_read(s_adc, buf, sizeof(buf), &out_len, 0);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "adc_continuous_read failed: %s", esp_err_to_name(err));
             return false;
