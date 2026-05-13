@@ -31,6 +31,8 @@ void pq_serial_write(const uint8_t *data, size_t len)
         );
         if (chunk > 0) {
             written += (size_t)chunk;
+        } else {
+            break; /* host not reading — drop remainder of frame */
         }
     }
 }
