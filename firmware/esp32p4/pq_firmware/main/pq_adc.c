@@ -23,11 +23,9 @@ static int16_t           s_i_buf[PQ_FRAME_SAMPLES];
 static volatile uint32_t s_count      = 0;
 static volatile bool     s_collecting = false;
 
-static void IRAM_ATTR timer_cb(void *arg)
+static void timer_cb(void *arg)
 {
-    BaseType_t woken = pdFALSE;
-    vTaskNotifyGiveFromISR(s_sample_task, &woken);
-    portYIELD_FROM_ISR(woken);
+    xTaskNotifyGive(s_sample_task);
 }
 
 static void sample_task_fn(void *arg)
@@ -70,7 +68,7 @@ void pq_adc_init(void)
     esp_timer_create_args_t timer_args = {
         .callback        = timer_cb,
         .arg             = NULL,
-        .dispatch_method = ESP_TIMER_ISR,
+        .dispatch_method = ESP_TIMER_TASK,
         .name            = "adc_tmr",
     };
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_timer));
