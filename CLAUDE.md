@@ -13,8 +13,8 @@ This file defines the default operating rules for Claude Code in this repository
 ## Repository Context
 
 - This is a real-time power quality monitoring repository.
-- The active MCU path is `firmware/teensy/`.
-- ESP32-P4 code exists under `firmware/esp32p4/` and is set aside for now.
+- The active MCU path is `firmware/esp32p4/`.
+- Legacy Teensy code exists for fallback and reference.
 - Host/runtime code is primarily Python-based.
 - Prefer preserving the existing acquisition and feature contract unless the user asks to change it.
 
@@ -38,7 +38,7 @@ This file defines the default operating rules for Claude Code in this repository
 5. Summarize findings instead of narrating every exploration step.
 6. Prefer targeted edits over speculative refactors.
 7. Do not read large files fully when a focused section is enough.
-8. Do not use multiple tools when one precise tool call will do.
+8. Do not use multiple tools when one precise tool call will do..
 
 ## Working Style
 
