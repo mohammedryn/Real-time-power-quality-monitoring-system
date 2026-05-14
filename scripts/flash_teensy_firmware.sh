@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+PORT="${1:-/dev/ttyACM0}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIRMWARE_DIR="$REPO_ROOT/firmware/teensy/pq_firmware"
 
@@ -10,7 +11,6 @@ if ! command -v pio >/dev/null 2>&1; then
   exit 1
 fi
 
-# Build firmware for Teensy 4.1 using platformio.ini in firmware directory.
-pio run -d "$FIRMWARE_DIR"
+pio run -d "$FIRMWARE_DIR" -t upload --upload-port "$PORT"
 
-echo "Teensy firmware compile succeeded."
+echo "Teensy firmware flash succeeded."

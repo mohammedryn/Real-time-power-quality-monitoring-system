@@ -10,7 +10,7 @@
 
 static const char *TAG = "pq_adc";
 
-#define SAMPLE_RATE_HZ   10000
+#define SAMPLE_RATE_HZ   5000
 #define SAMPLE_PERIOD_US (1000000 / SAMPLE_RATE_HZ)
 
 static adc_oneshot_unit_handle_t s_adc1        = NULL;
@@ -81,7 +81,7 @@ void pq_adc_init(void)
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer, SAMPLE_PERIOD_US));
 
-    ESP_LOGI(TAG, "ADC timer-oneshot: ch4/5 @ %d Hz (GPIO20/21)", SAMPLE_RATE_HZ);
+    ESP_LOGI(TAG, "ADC timer-oneshot: ch4/5 @ %d Hz (GPIO20/21) — 100ms/frame", SAMPLE_RATE_HZ);
 }
 
 bool pq_adc_read_frame(int16_t v_raw[PQ_FRAME_SAMPLES], int16_t i_raw[PQ_FRAME_SAMPLES])
