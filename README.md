@@ -1,8 +1,18 @@
 # Phase-Aware Real-Time Power Quality Monitoring System
 
+![System Cover](Evidence/Cover.png)
+
 A complete, hardware-enabled, end-to-end system for real-time detection and classification of power quality disturbances in low-voltage 230 V / 50 Hz networks. The system acquires synchronized dual-channel waveforms from a Teensy 4.1 microcontroller, extracts a 298-element phase-aware feature vector on-device, streams model-ready inference frames over USB to a Raspberry Pi 5, and renders a live touch dashboard with harmonic spectra, disturbance probabilities, event log, and system health telemetry.
 
 The project's core scientific contribution is demonstrating that **harmonic phase angles carry load-type-specific signatures** that are statistically distinct even when harmonic magnitudes are nearly identical — and that a deep learning model trained on phase-aware features outperforms magnitude-only baselines by 1–3% overall and substantially more for hard-to-distinguish class pairs.
+
+---
+
+## Demo
+
+**[Watch Demo Video](Evidence/Working.mp4)**
+
+> Live dashboard running on Raspberry Pi 5 — waveform capture, harmonic spectrum, and real-time disturbance classification.
 
 ---
 
@@ -144,6 +154,8 @@ This single design choice — 500 samples at 5 kHz — eliminates spectral leaka
 ---
 
 ## 3. Hardware Design
+
+![Circuit Diagram](Evidence/Circuit.png)
 
 ### 3.1 Architecture
 
