@@ -62,6 +62,13 @@ runtime:
   inference_target_hz: 10
   drop_policy: drop_oldest
 
+# Derives current waveform/metrics from the voltage channel for display and
+# inference when no current sensor (ACS758) is connected.
+synthetic_current:
+  enabled: true
+  phase_shift_deg: 15.0
+  rms_i_amps: 0.05
+
 paths:
   artifacts_root: artifacts
   synthetic_dataset: artifacts/datasets/synth_v1

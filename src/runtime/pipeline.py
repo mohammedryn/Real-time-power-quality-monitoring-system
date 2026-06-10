@@ -207,6 +207,14 @@ class RuntimePipeline:
         self._mains_freq = float(cfg["signal"].get("mains_frequency_hz", 50.0))
         self._receiver_mode = "tflite" if receiver_mode == "model4" else receiver_mode
 
+        synth_cfg = cfg.get("synthetic_current", {})
+        self._synth_current_enabled = bool(synth_cfg.get("enabled", False))
+        self._synth_phase_deg = float(synth_cfg.get("phase_shift_deg", 0.0))
+        self._synth_rms_i_amps = float(synth_cfg.get("rms_i_amps", 0.05))
+        self._synth_shift_samples = int(round(
+            self._synth_phase_deg / 360.0 * (float(cfg["signal"]["fs_hz"]) / self._mains_freq)
+        ))
+
         if self._receiver_mode == "feature" and getattr(self.predictor, "_is_multi_input", False):
             raise ValueError(
                 "receiver_mode='feature' is unsupported with the canonical TFLite predictor; "
@@ -364,6 +372,8 @@ class RuntimePipeline:
 
                 with self._metrics.time_stage("inference_total_ms"):
                     context = self._frame_to_context(frame)
+                    if self._synth_current_enabled:
+                        context = self._apply_synthetic_current(context)
                     with self._metrics.time_stage("model_ms"):
                         # Route to 3-input call when predictor supports it and
                         # the frame provided normalised waveforms.
@@ -390,6 +400,38 @@ class RuntimePipeline:
                     self._logger.write(snapshot)
         except Exception as exc:
             self._record_worker_error(exc)
+
+    def _apply_synthetic_current(self, context: FrameContext) -> FrameContext:
+        """Derive the current channel (waveform and full feature vector) from
+        the voltage channel, for systems with no current sensor connected.
+
+        i_phys is built as a phase-shifted, rescaled copy of v_phys, then the
+        entire 298-feature vector is recomputed from (v_phys, i_phys) so the
+        model and UI see a self-consistent set of V/I features instead of a
+        mix of real voltage features and firmware-computed garbage current
+        features from the floating ADC input.
+        """
+        if context.v_phys is not None:
+            v_phys = context.v_phys
+        elif context.v_norm is not None and len(context.features) > 3:
+            v_phys = (context.v_norm * float(context.features[3])).astype(np.float32)
+        else:
+            return context
+
+        rms_v = float(np.sqrt(np.mean(v_phys ** 2))) + 1e-12
+        i_phys = (
+            np.roll(v_phys, self._synth_shift_samples)
+            * (self._synth_rms_i_amps / rms_v)
+        ).astype(np.float32)
+
+        context.v_phys = np.asarray(v_phys, dtype=np.float32)
+        context.i_phys = i_phys
+        context.features = extract_features(v_phys, i_phys).astype(np.float32)
+
+        if context.v_norm is not None:
+            context.i_norm = np.roll(context.v_norm, self._synth_shift_samples).astype(np.float32)
+
+        return context
 
     def _frame_to_context(
         self,
